@@ -1,0 +1,12 @@
+[package]
+name = "nimdg"
+version = "0.1.0"
+authors = ["Sergey Kruzhilin <sergey8cpp@gmail.com>"]
+
+[dependencies.concurrent-hashmap]
+version = "0.2.2"
+default-features = false
+
+[dependencies]
+time = "0.1"
+
