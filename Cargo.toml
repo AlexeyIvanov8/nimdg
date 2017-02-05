@@ -1,12 +1,18 @@
 [package]
-name = "nimdg"
+name = "ex"
 version = "0.1.0"
 authors = ["Sergey Kruzhilin <sergey8cpp@gmail.com>"]
 
+[dependencies]
+rustc-serialize = "0.3.22"
+bincode = "0.6.1"
+iron = "0.4.0"
+valico = "1"
+hyper = "0.10.2"
+
 [dependencies.concurrent-hashmap]
-version = "0.2.2"
+version = "0.2.1"
 default-features = false
 
-[dependencies]
-time = "0.1"
-
+[dependencies.rustless]
+git = "https://github.com/rustless/rustless"
