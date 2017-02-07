@@ -48,12 +48,21 @@ impl ToJson for EntityDescription {
 	}
 }
 
+struct Field {
+	typeId: u16,
+	data: Vec<u8>,
+}
+
+struct Entity {
+	fields: Vec<Field>,
+}
+
 impl EntityDescription {
 	fn new() -> EntityDescription {
 		EntityDescription { fields: BTreeMap::new(), ids_map: BTreeMap::new() }
 	}
 
-	fn addField(&mut self, name: String, type: TypeDescription) {
+	fn addField(&mut self, name: String, typeDesc: TypeDescription) {
 
 	}
 }
@@ -76,7 +85,7 @@ impl ToJson for TableDescription {
 
 pub struct Table {
 	description: TableDescription,
-	data: ConcHashMap<
+	data: ConcHashMap<Entity, Entity>,
 }
 
 // For getting from frontend

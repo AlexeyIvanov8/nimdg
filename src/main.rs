@@ -256,7 +256,10 @@ fn main() {
 					})
 
 					endpoint.handle(|client, _params| {
-						let tableJson = client.add.getDataBaseManager().getTable();
+						let tableJson = _params
+								.find("name")
+								.map(as_str)
+								.and_then(|name| { client.add.getDataBaseManager().getTable(name) });
 						client.json(tableJson)
 					})
 				});
