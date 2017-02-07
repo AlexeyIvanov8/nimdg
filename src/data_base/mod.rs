@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::boxed::Box;
+use std::sync::atomic::AtomicUsize;
 use bincode::rustc_serialize::{encode, decode};
 
 use rustless::{self, Extensible};
@@ -32,8 +33,11 @@ impl ToJson for TypeDescription {
 }
 
 // Universal description of some entity. For example: key or value
-struct EntityDescription {
+// For performance purposes each field is marked by number id
+pub struct EntityDescription {
+	count: AtomicUsize,
 	fields: BTreeMap<String, Arc<Box<TypeDescription>>>,
+	ids_map: BTreeMap<u16, String>,
 }
 
 impl ToJson for EntityDescription {
@@ -46,7 +50,11 @@ impl ToJson for EntityDescription {
 
 impl EntityDescription {
 	fn new() -> EntityDescription {
-		EntityDescription { fields: BTreeMap::new() }
+		EntityDescription { fields: BTreeMap::new(), ids_map: BTreeMap::new() }
+	}
+
+	fn addField(&mut self, name: String, type: TypeDescription) {
+
 	}
 }
 
@@ -65,6 +73,12 @@ impl ToJson for TableDescription {
 		rustless::json::JsonValue::Object(res)
 	}
 }
+
+pub struct Table {
+	description: TableDescription,
+	data: ConcHashMap<
+}
+
 // For getting from frontend
 pub struct EntityDescriptionView {
 	pub fields: BTreeMap<String, String>,
@@ -198,6 +212,10 @@ impl DataBaseManager {
 		}).collect();
 		rustless::json::JsonValue::Object(res)
     }
+
+	pub fn getTable(&self, name: &String) -> Option<rustless::json::JsonValue> {
+		self.tableDescriptions.get(name).map(to_json)
+	} 
 
     pub fn addTable(&self, tableDescription: TableDescriptionView) {
         let tableDesc = createTableDescription(&tableDescription, &self.typeDescriptions);

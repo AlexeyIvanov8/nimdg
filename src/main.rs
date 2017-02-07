@@ -215,24 +215,9 @@ fn main() {
 				})
 			});
 
-			cache_api.namespace("caches/:id", |cache_ns| {
-				cache_ns.params(|params| {
-					params.req_typed("id", json_dsl::u64())
-				});
-
-				cache_ns.post("test", |endpoint| {
-					endpoint.handle(|client, params| {
-						println!("Params = {:?}", &params.to_json());
-						let id = params.find("id").unwrap().as_u64().unwrap();
-						client.text("Info about ".to_string() + 
-							id.to_string().as_str() + 
-							" cache")
-					})
-				});
-
-				cache_ns.post("description/:desc_id", |endpoint: &mut rustless::Endpoint| {
-				//cache_ns.post("description/:desc_id", |endpoint: &mut rustless::Endpoint| {
-					println!("Desc update");
+			cache_api.namespace("meta", |mats_ns| {
+				cache_api.post("table", |endpoint| {
+					println!("Table update");
 					endpoint.desc("Update description");
 					endpoint.params(|params| {
 						params.req_typed("desc_id", json_dsl::u64());
@@ -245,7 +230,6 @@ fn main() {
 									props.insert("name", |name| {
 										name.string();
 									});
-									
 									props.insert("key", |key| {
 										key.object();
 									});
@@ -253,7 +237,8 @@ fn main() {
 							})
 						})
 					});
-					endpoint.handle(move |mut client, _params| {
+
+					endpoint.handle(|mut client, _params| {
 						println!("Params = {:?}", &_params.to_json());
 						let cache_desc = _params.find("data").unwrap();
 						let tableDesc = readTableDescriptionView(cache_desc);
@@ -262,6 +247,17 @@ fn main() {
 						client.app.getDataBaseManager().addTable(tableDesc);
 						client.set_status(rustless::server::status::StatusCode::Ok);
 						client.json(&_params.to_json())
+					})
+				});
+
+				cache_api.get("table/:name", |endpoint| {
+					endpoint.params(|params| {
+						params.req_typed("name", json_dsl::string)
+					})
+
+					endpoint.handle(|client, _params| {
+						let tableJson = client.add.getDataBaseManager().getTable();
+						client.json(tableJson)
 					})
 				});
 			});
