@@ -215,8 +215,8 @@ fn main() {
 				})
 			});
 
-			cache_api.namespace("meta", |mats_ns| {
-				cache_api.post("table", |endpoint| {
+			cache_api.namespace("meta", |meta_ns| {
+				meta_ns.post("table", |endpoint| {
 					println!("Table update");
 					endpoint.desc("Update description");
 					endpoint.params(|params| {
@@ -250,7 +250,7 @@ fn main() {
 					})
 				});
 
-				cache_api.get("table/:name", |endpoint| {
+				meta_ns.get("table/:name", |endpoint| {
 					endpoint.params(|params| {
 						params.req_typed("name", json_dsl::string())
 					});
@@ -258,9 +258,12 @@ fn main() {
 					endpoint.handle(|client, _params| {
 						let tableJson = _params
 								.find("name")
-								.map(as_str)
-								.and_then(|name| { client.add.getDataBaseManager().getTable(name) });
-						client.json(tableJson)
+								.and_then(|name| { name.as_str() })
+								.and_then(|name| { client.app.getDataBaseManager().getTable(&String::from(name)) });
+						match tableJson {
+							Some(value) => client.json(&value),
+							None => client.text(String::from("Table not found")), 
+						}
 					})
 				});
 			});

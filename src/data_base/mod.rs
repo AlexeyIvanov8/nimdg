@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::boxed::Box;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use bincode::rustc_serialize::{encode, decode};
 
 use rustless::{self, Extensible};
@@ -58,8 +59,16 @@ struct Entity {
 }
 
 impl EntityDescription {
-	fn new() -> EntityDescription {
+	fn blank() -> EntityDescription {
 		EntityDescription { count: AtomicUsize::new(0), fields: BTreeMap::new(), ids_map: BTreeMap::new() }
+	}
+
+	fn from_fields(fields: BTreeMap<String, Arc<Box<TypeDescription>>>) -> EntityDescription {
+		let count = AtomicUsize::new(0);
+		let mut ids_map = fields.iter()
+				.map(|(k, v)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
+				.collect(); //BTreeMap::<u16, String>::new();
+		EntityDescription { count: count, fields: fields, ids_map: ids_map }
 	}
 
 	fn addField(&mut self, name: String, typeDesc: TypeDescription) {
@@ -147,7 +156,7 @@ fn createEntityDescription(
 	}
 	else {
 		let entity_fields = entity_fields.iter_mut().filter_map(move |(k, v)| { v.clone().map(|value| { (k.clone(), value )}) }).collect();
-		Ok(EntityDescription { fields: entity_fields})
+		Ok(EntityDescription::from_fields(entity_fields))
 	}
 }
 
@@ -195,7 +204,7 @@ impl DataBaseManager {
         dbManager.typeDescriptions.insert("String".to_string(), stringType.clone());
         dbManager.typeDescriptions.insert("u64".to_string(), u64Type.clone());
         
-        let mut ed = EntityDescription::new();
+        let mut ed = EntityDescription::blank();
         ed.fields.insert("id".to_string(), u64Type.clone());
         ed.fields.insert("code".to_string(), stringType.clone());
         ed.fields.insert("name".to_string(), stringType.clone());
@@ -223,7 +232,7 @@ impl DataBaseManager {
     }
 
 	pub fn getTable(&self, name: &String) -> Option<rustless::json::JsonValue> {
-		self.tableDescriptions.find(name).map(rustless::json::ToJson::to_json)
+		self.tableDescriptions.find(name).map(|table| { table.get().to_json() })
 	} 
 
     pub fn addTable(&self, tableDescription: TableDescriptionView) {
