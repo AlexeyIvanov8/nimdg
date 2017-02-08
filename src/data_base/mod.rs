@@ -59,7 +59,7 @@ struct Entity {
 
 impl EntityDescription {
 	fn new() -> EntityDescription {
-		EntityDescription { fields: BTreeMap::new(), ids_map: BTreeMap::new() }
+		EntityDescription { count: AtomicUsize::new(0), fields: BTreeMap::new(), ids_map: BTreeMap::new() }
 	}
 
 	fn addField(&mut self, name: String, typeDesc: TypeDescription) {
@@ -223,7 +223,7 @@ impl DataBaseManager {
     }
 
 	pub fn getTable(&self, name: &String) -> Option<rustless::json::JsonValue> {
-		self.tableDescriptions.get(name).map(to_json)
+		self.tableDescriptions.find(name).map(rustless::json::ToJson::to_json)
 	} 
 
     pub fn addTable(&self, tableDescription: TableDescriptionView) {

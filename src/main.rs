@@ -252,8 +252,8 @@ fn main() {
 
 				cache_api.get("table/:name", |endpoint| {
 					endpoint.params(|params| {
-						params.req_typed("name", json_dsl::string)
-					})
+						params.req_typed("name", json_dsl::string())
+					});
 
 					endpoint.handle(|client, _params| {
 						let tableJson = _params
