@@ -215,13 +215,12 @@ fn main() {
 				})
 			});
 
+			
 			cache_api.namespace("meta", |meta_ns| {
 				meta_ns.post("table", |endpoint| {
 					println!("Table update");
 					endpoint.desc("Update description");
 					endpoint.params(|params| {
-						params.req_typed("desc_id", json_dsl::u64());
-						params.req_typed("id", json_dsl::u64());
 						params.req("data", |data| {
 							data.desc("Data of cache structure");
 							data.schema(|cache_desc| {
