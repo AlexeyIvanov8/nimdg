@@ -215,7 +215,18 @@ fn main() {
 				})
 			});
 
-			
+			cache_api.post("put/:table_name", |endpoint| {
+				endpoint.params(|params| {
+					params.req("table_name", json_dsl::string());
+					params.req("data", |data| {
+
+					})
+				});
+				endpoint.handle(|mut client, params| {
+
+				})
+			});
+
 			cache_api.namespace("meta", |meta_ns| {
 				meta_ns.post("table", |endpoint| {
 					println!("Table update");
