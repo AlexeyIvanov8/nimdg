@@ -50,12 +50,12 @@ impl ToJson for EntityDescription {
 }
 
 struct Field {
-	typeId: u16,
+	//typeId: u16,
 	data: Vec<u8>,
 }
 
 struct Entity {
-	fields: Vec<Field>,
+	fields: BTreeMap<u16, Field>,
 }
 
 impl EntityDescription {
@@ -97,6 +97,50 @@ pub struct Table {
 	data: ConcHashMap<Entity, Entity>,
 }
 
+impl Table {
+	fn read_entity(&self, json: rustless:json::JsonValue, description: EntityDescription) -> Result<Entity, &'static str> {
+		if(json.is_object()) {
+			let json_object = json.as_object();
+			json_object.and_then(|object| {
+				// 1. select types for json fields
+				let selected_values = object.iter().filter_map(|name, value| {
+					let type_desc = description.fields.get(name);
+					let field_id = description.ids_map.get(name);
+					let field_desc = type_desc.and_then(|type_desc| { 
+						field_id.map(|field_id| { (field_id, type_desc) })
+					});
+					field_desc.map(|(field_id, type_desc)| (name, (field_id, type_desc, value)) )
+				}).collect();
+				let selected_values_keys = selected_values.keys().iter().collect::<HashSet<String>>();
+				
+				// 2. check what all fields is typed and 
+				let json_keys = object.keys().iter().collect::<HashSet<String>>();
+				let unselected_json_keys = selected_values_keys.intersect(json_keys);
+
+				// 3. all types selected
+				let types_keys = description.fields.keys().iter().collect::<HashSet<String>>();
+				let unselected_typed_keys = selected_values_keys.intersect(types_keys);
+
+				if(!unselected_json_keys.is_empty() || unselected_typed_keys.is_empty()) {
+					Err("Found unselected json values = [" + 
+						unselected_json_keys.iter().fold(String::new(), key) + 
+						"] and unused entity fields =[" +
+						unselected_typed_keys.iter().fold(String::new(), key))
+				}
+				else {
+					Ok( selected_values.map(|(name, (field_id, type_desc, value))| (field_id, type_desc.reader(value))) )
+				}
+			});
+			description.fields.map(|(name, desc)| {
+				
+			})
+		}
+	}
+
+	pub fn put(&self, key: rustless::json::JsonValue, value: rustless::json::JsonValue) {
+
+	}
+}
 // For getting from frontend
 pub struct EntityDescriptionView {
 	pub fields: BTreeMap<String, String>,
@@ -111,6 +155,7 @@ pub struct TableDescriptionView {
 pub struct DataBaseManager {
     typeDescriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
     tableDescriptions: ConcHashMap<String, TableDescription>, //BTreeMap::<String, TableDescription>::new();
+	tables: ConcHashMap<String, Table>,
 }
 
 fn read(ed: &EntityDescription, jsonString: String) -> HashMap<String, Vec<u8>> {
@@ -239,6 +284,15 @@ impl DataBaseManager {
         let tableDesc = createTableDescription(&tableDescription, &self.typeDescriptions);
 		self.tableDescriptions.insert(tableDesc.name.clone(), tableDesc);
     }
+
+	pub fn addData(&self,
+			table_name: String, 
+			key: rustless::json::JsonValue,
+			value: rustless::json::JsonValue) {
+		self.tables.find(table_name).and_then(|table| {
+			table.
+		})
+	}
 }
 
 pub struct AppDataBase;

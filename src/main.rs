@@ -223,7 +223,8 @@ fn main() {
 					})
 				});
 				endpoint.handle(|mut client, params| {
-
+					let data = params.find("data");
+					
 				})
 			});
 
