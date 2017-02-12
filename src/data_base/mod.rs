@@ -9,6 +9,7 @@ use rustless::json::ToJson;
 use concurrent_hashmap::*;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::boxed::Box;
 use std::sync::atomic::AtomicUsize;
@@ -39,6 +40,7 @@ pub struct EntityDescription {
 	count: AtomicUsize,
 	fields: BTreeMap<String, Arc<Box<TypeDescription>>>,
 	ids_map: BTreeMap<u16, String>,
+	reverse_ids_map: BTreeMap<String, u16>,
 }
 
 impl ToJson for EntityDescription {
@@ -60,15 +62,21 @@ struct Entity {
 
 impl EntityDescription {
 	fn blank() -> EntityDescription {
-		EntityDescription { count: AtomicUsize::new(0), fields: BTreeMap::new(), ids_map: BTreeMap::new() }
+		EntityDescription { count: AtomicUsize::new(0), 
+				fields: BTreeMap::new(), ids_map:
+				BTreeMap::new(), 
+				reverse_ids_map: BTreeMap::new() 
+		}
 	}
 
 	fn from_fields(fields: BTreeMap<String, Arc<Box<TypeDescription>>>) -> EntityDescription {
 		let count = AtomicUsize::new(0);
+		let u16_count = (count.fetch_add(1, Ordering::Relaxed) as u16;
 		let mut ids_map = fields.iter()
-				.map(|(k, v)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
+				.map(|(k, v)| { (count.clone(), k.clone()) })
 				.collect(); //BTreeMap::<u16, String>::new();
-		EntityDescription { count: count, fields: fields, ids_map: ids_map }
+		let mut reverse_ids_map = ids_map.map(|(k, v)| { (v, k) }).collect();
+		EntityDescription { count: count, fields: fields, ids_map: ids_map, reverse_ids_map: reverse_ids_map }
 	}
 
 	fn addField(&mut self, name: String, typeDesc: TypeDescription) {
@@ -98,14 +106,14 @@ pub struct Table {
 }
 
 impl Table {
-	fn read_entity(&self, json: rustless:json::JsonValue, description: EntityDescription) -> Result<Entity, &'static str> {
-		if(json.is_object()) {
+	fn read_entity(&self, json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, &'static str> {
+		if json.is_object() {
 			let json_object = json.as_object();
 			json_object.and_then(|object| {
 				// 1. select types for json fields
-				let selected_values = object.iter().filter_map(|name, value| {
+				let selected_values = object.iter().filter_map(|(name, value)| {
 					let type_desc = description.fields.get(name);
-					let field_id = description.ids_map.get(name);
+					let field_id = description.reverse_ids_map.get(name);
 					let field_desc = type_desc.and_then(|type_desc| { 
 						field_id.map(|field_id| { (field_id, type_desc) })
 					});
@@ -121,11 +129,11 @@ impl Table {
 				let types_keys = description.fields.keys().iter().collect::<HashSet<String>>();
 				let unselected_typed_keys = selected_values_keys.intersect(types_keys);
 
-				if(!unselected_json_keys.is_empty() || unselected_typed_keys.is_empty()) {
+				if !unselected_json_keys.is_empty() || unselected_typed_keys.is_empty() {
 					Err("Found unselected json values = [" + 
-						unselected_json_keys.iter().fold(String::new(), key) + 
+						unselected_json_keys.iter().fold(String::new(), |acc, &key| { acc + key }) + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), key))
+						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key }))
 				}
 				else {
 					Ok( selected_values.map(|(name, (field_id, type_desc, value))| (field_id, type_desc.reader(value))) )
@@ -137,8 +145,16 @@ impl Table {
 		}
 	}
 
-	pub fn put(&self, key: rustless::json::JsonValue, value: rustless::json::JsonValue) {
-
+	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) {
+		let key_entity = Table::read_entity(key, &self.description.key);
+		let value_entity = Table::read_entity(value, &self.description.value);
+		key_entity.and_then(|key_entity| { 
+			value_entity.map(|value_entity| { 
+				(key_entity, value_entity) 
+			})
+		}).map(|(k, v)| {
+			self.data.insert(k, v)
+		});
 	}
 }
 // For getting from frontend
@@ -290,8 +306,8 @@ impl DataBaseManager {
 			key: rustless::json::JsonValue,
 			value: rustless::json::JsonValue) {
 		self.tables.find(table_name).and_then(|table| {
-			table.
-		})
+			table.put(key, value);
+		});
 	}
 }
 
