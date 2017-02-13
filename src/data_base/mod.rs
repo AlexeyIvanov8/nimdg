@@ -71,11 +71,10 @@ impl EntityDescription {
 
 	fn from_fields(fields: BTreeMap<String, Arc<Box<TypeDescription>>>) -> EntityDescription {
 		let count = AtomicUsize::new(0);
-		let u16_count = (count.fetch_add(1, Ordering::Relaxed) as u16;
 		let mut ids_map = fields.iter()
-				.map(|(k, v)| { (count.clone(), k.clone()) })
-				.collect(); //BTreeMap::<u16, String>::new();
-		let mut reverse_ids_map = ids_map.map(|(k, v)| { (v, k) }).collect();
+				.map(|(k, v)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
+				.collect::<BTreeMap<u16, String>>(); //BTreeMap::<u16, String>::new();
+		let mut reverse_ids_map = ids_map.iter().map(|(k, v)| { (*v, *k) }).collect::<BTreeMap<String, u16>>();
 		EntityDescription { count: count, fields: fields, ids_map: ids_map, reverse_ids_map: reverse_ids_map }
 	}
 
@@ -109,7 +108,7 @@ impl Table {
 	fn read_entity(&self, json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, &'static str> {
 		if json.is_object() {
 			let json_object = json.as_object();
-			json_object.and_then(|object| {
+			let res = json_object.map(|object| {
 				// 1. select types for json fields
 				let selected_values = object.iter().filter_map(|(name, value)| {
 					let type_desc = description.fields.get(name);
@@ -117,31 +116,40 @@ impl Table {
 					let field_desc = type_desc.and_then(|type_desc| { 
 						field_id.map(|field_id| { (field_id, type_desc) })
 					});
-					field_desc.map(|(field_id, type_desc)| (name, (field_id, type_desc, value)) )
-				}).collect();
-				let selected_values_keys = selected_values.keys().iter().collect::<HashSet<String>>();
+					field_desc.map(|(field_id, type_desc)| (name.clone(), (field_id, type_desc.clone(), value)) )
+				}).collect::<BTreeMap<String, (&u16, Arc<Box<TypeDescription>>, &rustless::json::JsonValue)>>();
+				let selected_values_keys = selected_values.keys().map(|key| key.clone()).collect::<HashSet<String>>();
 				
 				// 2. check what all fields is typed and 
-				let json_keys = object.keys().iter().collect::<HashSet<String>>();
-				let unselected_json_keys = selected_values_keys.intersect(json_keys);
+				let json_keys = object.keys().map(|key| key.clone()).collect::<HashSet<String>>();
+				let unselected_json_keys = &selected_values_keys ^ &json_keys;
 
 				// 3. all types selected
-				let types_keys = description.fields.keys().iter().collect::<HashSet<String>>();
-				let unselected_typed_keys = selected_values_keys.intersect(types_keys);
+				let types_keys = description.fields.keys().map(|key| key.clone()).collect::<HashSet<String>>();
+				let unselected_typed_keys = &selected_values_keys ^ &types_keys;
 
 				if !unselected_json_keys.is_empty() || unselected_typed_keys.is_empty() {
-					Err("Found unselected json values = [" + 
-						unselected_json_keys.iter().fold(String::new(), |acc, &key| { acc + key }) + 
+					Some(Err("Found unselected json values = [".to_string() + 
+						unselected_json_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str() + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key }))
+						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str()))
 				}
 				else {
-					Ok( selected_values.map(|(name, (field_id, type_desc, value))| (field_id, type_desc.reader(value))) )
+					let fields = selected_values.iter().map(|(name, &(&field_id, type_desc, &value))| 
+							(field_id, Field { data: (type_desc.reader)(&value) }))
+						.collect();
+					Some(Ok( Entity { fields: fields } ))
 				}
 			});
-			description.fields.map(|(name, desc)| {
+			match res {
+				Some(res) => res,
+				None => Err("Json object not found"),
+			}
+			/*description.fields.map(|(name, desc)| {
 				
-			})
+			})*/
+		} else {
+			Err("Not object")
 		}
 	}
 
