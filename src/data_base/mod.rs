@@ -1,6 +1,7 @@
 extern crate iron;
 extern crate concurrent_hashmap;
 extern crate bincode;
+extern crate serde_json;
 
 use rustc_serialize::json;
 use rustc_serialize::json::Json;
@@ -8,6 +9,7 @@ use rustless::json::ToJson;
 
 use concurrent_hashmap::*;
 use std::collections::BTreeMap;
+use std::hash::Hash;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -16,13 +18,15 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use bincode::rustc_serialize::{encode, decode};
 
+use std::str::FromStr;
+
 use rustless::{self, Extensible};
 
 // Type trait, that allow define user type
 struct TypeDescription {
 	name: String,
-	reader: Box<Fn(&Json) -> Vec<u8>>,
-	writer: Box<Fn(&Vec<u8>) -> Json>,
+	reader: Box<Fn(&rustless::json::JsonValue) -> Vec<u8>>,
+	writer: Box<Fn(&Vec<u8>) -> rustless::json::JsonValue>,
 }
 
 unsafe impl Send for TypeDescription {}
@@ -51,13 +55,29 @@ impl ToJson for EntityDescription {
 	}
 }
 
+#[derive(Eq)]
+#[derive(Hash)]
 struct Field {
 	//typeId: u16,
 	data: Vec<u8>,
 }
 
+impl PartialEq for Field {
+    fn eq(&self, other: &Field) -> bool {
+        self.data == other.data
+    }
+}
+
+#[derive(Eq)]
+#[derive(Hash)]
 struct Entity {
 	fields: BTreeMap<u16, Field>,
+}
+
+impl PartialEq for Entity {
+	fn eq(&self, other: &Entity) -> bool {
+		self.fields == other.fields
+	}
 }
 
 impl EntityDescription {
@@ -105,7 +125,7 @@ pub struct Table {
 }
 
 impl Table {
-	fn read_entity(&self, json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, &'static str> {
+	fn read_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
 		if json.is_object() {
 			let json_object = json.as_object();
 			let res = json_object.map(|object| {
@@ -129,27 +149,27 @@ impl Table {
 				let unselected_typed_keys = &selected_values_keys ^ &types_keys;
 
 				if !unselected_json_keys.is_empty() || unselected_typed_keys.is_empty() {
-					Some(Err("Found unselected json values = [".to_string() + 
+					Err("Found unselected json values = [".to_string() + 
 						unselected_json_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str() + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str()))
+						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str())
 				}
 				else {
 					let fields = selected_values.iter().map(|(name, &(&field_id, type_desc, &value))| 
 							(field_id, Field { data: (type_desc.reader)(&value) }))
 						.collect();
-					Some(Ok( Entity { fields: fields } ))
+					Ok( Entity { fields: fields } )
 				}
 			});
 			match res {
-				Some(res) => res,
-				None => Err("Json object not found"),
+				Some(value) => value,
+				None => Err("Json object not found".to_string()),
 			}
 			/*description.fields.map(|(name, desc)| {
 				
 			})*/
 		} else {
-			Err("Not object")
+			Err("Not object".to_string())
 		}
 	}
 
@@ -183,7 +203,7 @@ pub struct DataBaseManager {
 }
 
 fn read(ed: &EntityDescription, jsonString: String) -> HashMap<String, Vec<u8>> {
-	let data = Json::from_str(&jsonString).unwrap();
+	let data = rustless::json::JsonValue::from_str(&jsonString).unwrap();
 	let object = data.as_object().unwrap();
 	let mut res = HashMap::new();
 	for (key, value) in object.iter() {
@@ -195,15 +215,15 @@ fn read(ed: &EntityDescription, jsonString: String) -> HashMap<String, Vec<u8>> 
 	res
 }
 
-fn write(ed: &EntityDescription, data: HashMap<String, Vec<u8>>) -> Json {
-	let mut jsonObject = BTreeMap::<String, Json>::new();
+fn write(ed: &EntityDescription, data: HashMap<String, Vec<u8>>) -> rustless::json::JsonValue {
+	let mut jsonObject = BTreeMap::<String, rustless::json::JsonValue>::new();
 	for (key, value) in data.iter() {
 		match ed.fields.get(key) {
 			Some(typeDesc) => jsonObject.insert(key.clone(), (typeDesc.writer)(value)),
 			None => panic!("Type for key {} not found", key),
 		};
 	};
-	Json::Object(jsonObject)
+	rustless::json::JsonValue::Object(jsonObject)
 }
 
 fn getUndefinedFields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescription>>> >) -> Vec<String> {
@@ -241,19 +261,20 @@ impl DataBaseManager {
     pub fn new() -> DataBaseManager {
         let mut dbManager = DataBaseManager { 
             typeDescriptions: BTreeMap::new(),
-            tableDescriptions: ConcHashMap::<String, TableDescription>::new() };
+            tableDescriptions: ConcHashMap::<String, TableDescription>::new(),
+			tables: ConcHashMap::<String, Table>::new() };
 
         let stringType = Arc::new(Box::new(TypeDescription {
             name: "StringType".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
-                    Json::String(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
+                    rustless::json::JsonValue::String(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
                     _ => panic!("Ожидался тип String"),
                 }
             }),
             writer: Box::new(move |value: &Vec<u8>| {
                 let string: String = decode(&value[..]).unwrap();
-                Json::String(string)
+                rustless::json::JsonValue::String(string)
             }),
         }));
 
@@ -261,12 +282,12 @@ impl DataBaseManager {
             name: "U64Type".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
-                    Json::U64(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
+                    rustless::json::JsonValue::U64(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
                     _ => panic!("Ожидался тип u64"),
                 }
             }),
             writer: Box::new(move |value| {
-                Json::U64(decode(&value[..]).unwrap())
+                rustless::json::JsonValue::U64(decode(&value[..]).unwrap())
             }),
         }));
 
@@ -284,7 +305,7 @@ impl DataBaseManager {
         println!("### = {:?}", readed);
 
         let writed = write(&ed, readed);
-        println!("$$$ = {}", writed.pretty());
+        println!("$$$ = {}", writed);
 
         dbManager
     }
@@ -310,12 +331,16 @@ impl DataBaseManager {
     }
 
 	pub fn addData(&self,
-			table_name: String, 
-			key: rustless::json::JsonValue,
-			value: rustless::json::JsonValue) {
-		self.tables.find(table_name).and_then(|table| {
-			table.put(key, value);
-		});
+			table_name: &String, 
+			key: &rustless::json::JsonValue,
+			value: &rustless::json::JsonValue) -> Result<(), String> {
+		match self.tables.find(table_name) {
+			Some(table) => { 
+				table.get().put(key, value);
+				Ok(())
+			},
+			None => Err("Table with name ".to_string() + table_name.clone().as_str() + " not found.")
+		}
 	}
 }
 
