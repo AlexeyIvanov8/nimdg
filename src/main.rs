@@ -217,14 +217,23 @@ fn main() {
 
 			cache_api.post("put/:table_name", |endpoint| {
 				endpoint.params(|params| {
-					params.req("table_name", json_dsl::string());
+					params.req_typed("table_name", json_dsl::string());
 					params.req("data", |data| {
 
 					})
 				});
 				endpoint.handle(|mut client, params| {
-					let data = params.find("data");
-					
+					match params.find("data") {
+						Some(data) => {
+							let db_manager = client.app.getDataBaseManager();
+							let data_object = data.as_object().unwrap();
+							db_manager.add_data(&String::from(params.find("name").unwrap().as_str().unwrap()),
+								data_object.get("key").unwrap(),
+								data_object.get("value").unwrap());
+						},
+						None => {}
+					};
+					client.text("Done".to_string())
 				})
 			});
 

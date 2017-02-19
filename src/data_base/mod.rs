@@ -94,7 +94,7 @@ impl EntityDescription {
 		let mut ids_map = fields.iter()
 				.map(|(k, v)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
 				.collect::<BTreeMap<u16, String>>(); //BTreeMap::<u16, String>::new();
-		let mut reverse_ids_map = ids_map.iter().map(|(k, v)| { (*v, *k) }).collect::<BTreeMap<String, u16>>();
+		let mut reverse_ids_map = ids_map.iter().map(|(k, v)| { (v.clone(), k.clone()) }).collect::<BTreeMap<String, u16>>();
 		EntityDescription { count: count, fields: fields, ids_map: ids_map, reverse_ids_map: reverse_ids_map }
 	}
 
@@ -150,12 +150,12 @@ impl Table {
 
 				if !unselected_json_keys.is_empty() || unselected_typed_keys.is_empty() {
 					Err("Found unselected json values = [".to_string() + 
-						unselected_json_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str() + 
+						unselected_json_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), |acc, &key| { acc + key.as_str() }).as_str())
+						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str())
 				}
 				else {
-					let fields = selected_values.iter().map(|(name, &(&field_id, type_desc, &value))| 
+					let fields = selected_values.iter().map(|(name, &(&field_id, ref type_desc, ref value))| 
 							(field_id, Field { data: (type_desc.reader)(&value) }))
 						.collect();
 					Ok( Entity { fields: fields } )
@@ -265,7 +265,7 @@ impl DataBaseManager {
 			tables: ConcHashMap::<String, Table>::new() };
 
         let stringType = Arc::new(Box::new(TypeDescription {
-            name: "StringType".to_string(),
+            name: "String".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
@@ -279,7 +279,7 @@ impl DataBaseManager {
         }));
 
         let u64Type = Arc::new(Box::new(TypeDescription {
-            name: "U64Type".to_string(),
+            name: "u64".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::U64(value) => encode(&value.clone(), bincode::SizeLimit::Infinite).unwrap(),
@@ -291,8 +291,8 @@ impl DataBaseManager {
             }),
         }));
 
-        dbManager.typeDescriptions.insert("String".to_string(), stringType.clone());
-        dbManager.typeDescriptions.insert("u64".to_string(), u64Type.clone());
+        dbManager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
+        dbManager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
         
         let mut ed = EntityDescription::blank();
         ed.fields.insert("id".to_string(), u64Type.clone());
@@ -330,7 +330,7 @@ impl DataBaseManager {
 		self.tableDescriptions.insert(tableDesc.name.clone(), tableDesc);
     }
 
-	pub fn addData(&self,
+	pub fn add_data(&self,
 			table_name: &String, 
 			key: &rustless::json::JsonValue,
 			value: &rustless::json::JsonValue) -> Result<(), String> {
