@@ -264,7 +264,7 @@ impl DataBaseManager {
             tableDescriptions: ConcHashMap::<String, TableDescription>::new(),
 			tables: ConcHashMap::<String, Table>::new() };
 
-        let stringType = Arc::new(Box::new(TypeDescription {
+        let stringType = TypeDescription {
             name: "String".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
@@ -276,9 +276,9 @@ impl DataBaseManager {
                 let string: String = decode(&value[..]).unwrap();
                 rustless::json::JsonValue::String(string)
             }),
-        }));
+        };
 
-        let u64Type = Arc::new(Box::new(TypeDescription {
+        let u64Type = TypeDescription {
             name: "u64".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
@@ -289,12 +289,15 @@ impl DataBaseManager {
             writer: Box::new(move |value| {
                 rustless::json::JsonValue::U64(decode(&value[..]).unwrap())
             }),
-        }));
+        };
 
-        dbManager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
-        dbManager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
+		dbManager.add_type(u64Type);
+		dbManager.add_type(stringType);
+
+        //dbManager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
+        //dbManager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
         
-        let mut ed = EntityDescription::blank();
+        /*let mut ed = EntityDescription::blank();
         ed.fields.insert("id".to_string(), u64Type.clone());
         ed.fields.insert("code".to_string(), stringType.clone());
         ed.fields.insert("name".to_string(), stringType.clone());
@@ -305,10 +308,19 @@ impl DataBaseManager {
         println!("### = {:?}", readed);
 
         let writed = write(&ed, readed);
-        println!("$$$ = {}", writed);
+        println!("$$$ = {}", writed);*/
 
         dbManager
     }
+
+	pub fn add_type(&self, type_desc: TypeDescription) -> Result<(), String> {
+		if !self.typeDescriptions.contains_key(type_desc.name) {
+			self.typeDescriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
+			Ok()
+		} else {
+			Err("Type with name ".to_string() + type_desc.name.clone().as_str() + " already defined.")
+		}
+	}
 
     pub fn printInfo(&self) -> () {
         println!("I'm a data base manager");
