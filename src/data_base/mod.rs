@@ -126,6 +126,7 @@ pub struct Table {
 
 impl Table {
 	fn read_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
+		println!("Begin put data {}", json);
 		if json.is_object() {
 			let json_object = json.as_object();
 			let res = json_object.map(|object| {
@@ -197,8 +198,8 @@ pub struct TableDescriptionView {
 }
 
 pub struct DataBaseManager {
-    typeDescriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
-    tableDescriptions: ConcHashMap<String, TableDescription>, //BTreeMap::<String, TableDescription>::new();
+    type_descriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
+    table_descriptions: ConcHashMap<String, TableDescription>, //BTreeMap::<String, TableDescription>::new();
 	tables: ConcHashMap<String, Table>,
 }
 
@@ -260,8 +261,8 @@ fn create_table_description(view: &TableDescriptionView, typeDescs: &BTreeMap<St
 impl DataBaseManager {
     pub fn new() -> DataBaseManager {
         let mut db_manager = DataBaseManager { 
-            typeDescriptions: BTreeMap::new(),
-            tableDescriptions: ConcHashMap::<String, TableDescription>::new(),
+            type_descriptions: BTreeMap::new(),
+            table_descriptions: ConcHashMap::<String, TableDescription>::new(),
 			tables: ConcHashMap::<String, Table>::new() };
 
         let stringType = TypeDescription {
@@ -294,8 +295,8 @@ impl DataBaseManager {
 		db_manager.add_type(u64Type);
 		db_manager.add_type(stringType);
 
-        //db_manager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
-        //db_manager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
+        //db_manager.type_descriptions.insert(stringType.name.clone(), stringType.clone());
+        //db_manager.type_descriptions.insert(u64Type.name.clone(), u64Type.clone());
         
         /*let mut ed = EntityDescription::blank();
         ed.fields.insert("id".to_string(), u64Type.clone());
@@ -314,8 +315,8 @@ impl DataBaseManager {
     }
 
 	pub fn add_type(&mut self, type_desc: TypeDescription) -> Result<(), String> {
-		if !self.typeDescriptions.contains_key(&type_desc.name) {
-			self.typeDescriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
+		if !self.type_descriptions.contains_key(&type_desc.name) {
+			self.type_descriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
 			Ok(())
 		} else {
 			Err("Type with name ".to_string() + type_desc.name.clone().as_str() + " already defined.")
@@ -327,19 +328,26 @@ impl DataBaseManager {
     }
 
     pub fn get_tables_list(&self) -> rustless::json::JsonValue {
-        let res = self.tableDescriptions.iter().map(|(k, v)| {
+        let res = self.table_descriptions.iter().map(|(k, v)| {
 			(k.clone(), v.to_json())
 		}).collect();
 		rustless::json::JsonValue::Object(res)
     }
 
 	pub fn get_table(&self, name: &String) -> Option<rustless::json::JsonValue> {
-		self.tableDescriptions.find(name).map(|table| { table.get().to_json() })
+		self.table_descriptions.find(name).map(|table| { table.get().to_json() })
 	} 
 
-    pub fn add_table(&self, tableDescription: TableDescriptionView) {
-        let tableDesc = create_table_description(&tableDescription, &self.typeDescriptions);
-		self.tableDescriptions.insert(tableDesc.name.clone(), tableDesc);
+	/** Add new table by he view description
+	 * return - table name or error description is adding fail */
+    pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
+		if !self.table_descriptions.find(&table_description.name).is_some() {
+        	let table_desc = create_table_description(&table_description, &self.type_descriptions);
+			self.table_descriptions.insert(table_desc.name.clone(), table_desc);
+			Ok(table_description.name.clone())
+		} else {
+			Err("Table with name ".to_string() + table_description.name.as_str() + " already exists.")
+		}
     }
 
 	pub fn add_data(&self,

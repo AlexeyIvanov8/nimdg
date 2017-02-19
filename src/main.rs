@@ -223,13 +223,15 @@ fn main() {
 					})
 				});
 				endpoint.handle(|mut client, params| {
-					match params.find("data") {
+					match params
+							.find("data")
+							.and_then(|data| data.as_object()) {
 						Some(data) => {
 							let db_manager = client.app.get_data_base_manager();
-							let data_object = data.as_object().unwrap();
-							db_manager.add_data(&String::from(params.find("name").unwrap().as_str().unwrap()),
-								data_object.get("key").unwrap(),
-								data_object.get("value").unwrap());
+							println!("Found data for put");
+							db_manager.add_data(&String::from(params.find("table_name").unwrap().as_str().unwrap()),
+								data.get("key").unwrap(),
+								data.get("value").unwrap());
 						},
 						None => {}
 					};
@@ -259,14 +261,18 @@ fn main() {
 					});
 
 					endpoint.handle(|mut client, _params| {
-						println!("Params = {:?}", &_params.to_json());
 						let cache_desc = _params.find("data").unwrap();
 						let tableDesc = readTableDescriptionView(cache_desc);
-						for (k, v) in &tableDesc.key.fields { println!("  key.field {}:{}", k, v) };
-						for (k, v) in &tableDesc.value.fields { println!("  value.field {}:{}", k, v) };
-						client.app.get_data_base_manager().add_table(tableDesc);
-						client.set_status(rustless::server::status::StatusCode::Ok);
-						client.json(&_params.to_json())
+						match client.app.get_data_base_manager().add_table(tableDesc) {
+							Ok(name) => {
+								client.set_status(rustless::server::status::StatusCode::Ok);
+								client.text("Table with name ".to_string() + name.as_str() + " succefully added")
+							},
+							Err(message) => {
+								client.set_status(rustless::server::status::StatusCode::BadRequest);
+								client.text(message)
+							}
+						}
 					})
 				});
 
@@ -275,15 +281,27 @@ fn main() {
 						params.req_typed("name", json_dsl::string())
 					});
 
-					endpoint.handle(|client, _params| {
-						let tableJson = _params
+					endpoint.handle(|client, params| {
+						match params
+								.find("name")
+								.and_then(|name| name.as_str()) {
+							Some(name) => {
+								let table_desc = client.app.get_data_base_manager().get_table(&String::from(name));
+								match table_desc {
+									Some(table_desc) => client.json(&table_desc),
+									None => client.text(String::from("Table ".to_string() + name + " not found"))
+								}
+							},
+							None => client.text("Parameter table name not found.".to_string())
+						}
+						/*let table_json = params
 								.find("name")
 								.and_then(|name| { name.as_str() })
 								.and_then(|name| { client.app.get_data_base_manager().get_table(&String::from(name)) });
-						match tableJson {
+						match table_json {
 							Some(value) => client.json(&value),
-							None => client.text(String::from("Table not found")), 
-						}
+							None => , 
+						}*/
 					})
 				});
 			});
