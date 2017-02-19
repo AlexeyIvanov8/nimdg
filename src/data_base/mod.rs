@@ -233,7 +233,7 @@ fn getUndefinedFields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescri
 	}}).collect::<Vec<String>>()
 }
 
-fn createEntityDescription(
+fn create_entity_description(
 		view: &EntityDescriptionView, 
 		typeDescs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
 	let mut entity_fields = view.fields.iter().map(|(k, v)| {
@@ -249,17 +249,17 @@ fn createEntityDescription(
 	}
 }
 
-fn createTableDescription(view: &TableDescriptionView, typeDescs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> TableDescription {
+fn create_table_description(view: &TableDescriptionView, typeDescs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> TableDescription {
 	TableDescription { 
 		name: view.name.clone(),
-		key: createEntityDescription(&view.key, typeDescs).unwrap(),
-		value: createEntityDescription(&view.value, typeDescs).unwrap()
+		key: create_entity_description(&view.key, typeDescs).unwrap(),
+		value: create_entity_description(&view.value, typeDescs).unwrap()
 	}
 }
 
 impl DataBaseManager {
     pub fn new() -> DataBaseManager {
-        let mut dbManager = DataBaseManager { 
+        let mut db_manager = DataBaseManager { 
             typeDescriptions: BTreeMap::new(),
             tableDescriptions: ConcHashMap::<String, TableDescription>::new(),
 			tables: ConcHashMap::<String, Table>::new() };
@@ -291,11 +291,11 @@ impl DataBaseManager {
             }),
         };
 
-		dbManager.add_type(u64Type);
-		dbManager.add_type(stringType);
+		db_manager.add_type(u64Type);
+		db_manager.add_type(stringType);
 
-        //dbManager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
-        //dbManager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
+        //db_manager.typeDescriptions.insert(stringType.name.clone(), stringType.clone());
+        //db_manager.typeDescriptions.insert(u64Type.name.clone(), u64Type.clone());
         
         /*let mut ed = EntityDescription::blank();
         ed.fields.insert("id".to_string(), u64Type.clone());
@@ -310,35 +310,35 @@ impl DataBaseManager {
         let writed = write(&ed, readed);
         println!("$$$ = {}", writed);*/
 
-        dbManager
+        db_manager
     }
 
-	pub fn add_type(&self, type_desc: TypeDescription) -> Result<(), String> {
-		if !self.typeDescriptions.contains_key(type_desc.name) {
+	pub fn add_type(&mut self, type_desc: TypeDescription) -> Result<(), String> {
+		if !self.typeDescriptions.contains_key(&type_desc.name) {
 			self.typeDescriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
-			Ok()
+			Ok(())
 		} else {
 			Err("Type with name ".to_string() + type_desc.name.clone().as_str() + " already defined.")
 		}
 	}
 
-    pub fn printInfo(&self) -> () {
+    pub fn print_info(&self) -> () {
         println!("I'm a data base manager");
     }
 
-    pub fn getTablesList(&self) -> rustless::json::JsonValue {
+    pub fn get_tables_list(&self) -> rustless::json::JsonValue {
         let res = self.tableDescriptions.iter().map(|(k, v)| {
 			(k.clone(), v.to_json())
 		}).collect();
 		rustless::json::JsonValue::Object(res)
     }
 
-	pub fn getTable(&self, name: &String) -> Option<rustless::json::JsonValue> {
+	pub fn get_table(&self, name: &String) -> Option<rustless::json::JsonValue> {
 		self.tableDescriptions.find(name).map(|table| { table.get().to_json() })
 	} 
 
-    pub fn addTable(&self, tableDescription: TableDescriptionView) {
-        let tableDesc = createTableDescription(&tableDescription, &self.typeDescriptions);
+    pub fn add_table(&self, tableDescription: TableDescriptionView) {
+        let tableDesc = create_table_description(&tableDescription, &self.typeDescriptions);
 		self.tableDescriptions.insert(tableDesc.name.clone(), tableDesc);
     }
 
@@ -362,11 +362,11 @@ impl iron::typemap::Key for AppDataBase {
 }
 
 pub trait DataBaseExtension: rustless::Extensible {
-    fn getDataBaseManager(&self) -> &DataBaseManager;
+    fn get_data_base_manager(&self) -> &DataBaseManager;
 }
 
 impl DataBaseExtension for rustless::Application {
-    fn getDataBaseManager(&self) -> &DataBaseManager {
+    fn get_data_base_manager(&self) -> &DataBaseManager {
         self.ext().get::<AppDataBase>().unwrap()
     }
 }

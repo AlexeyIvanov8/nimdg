@@ -208,10 +208,10 @@ fn main() {
 
 			cache_api.get("info", |endpoint| {
 				endpoint.handle(|client, params| {
-					let db_manager = client.app.getDataBaseManager();
-					db_manager.printInfo();
+					let db_manager = client.app.get_data_base_manager();
+					db_manager.print_info();
 					//client.text("Some usefull info".to_string())
-					client.json(&db_manager.getTablesList())
+					client.json(&db_manager.get_tables_list())
 				})
 			});
 
@@ -225,7 +225,7 @@ fn main() {
 				endpoint.handle(|mut client, params| {
 					match params.find("data") {
 						Some(data) => {
-							let db_manager = client.app.getDataBaseManager();
+							let db_manager = client.app.get_data_base_manager();
 							let data_object = data.as_object().unwrap();
 							db_manager.add_data(&String::from(params.find("name").unwrap().as_str().unwrap()),
 								data_object.get("key").unwrap(),
@@ -264,7 +264,7 @@ fn main() {
 						let tableDesc = readTableDescriptionView(cache_desc);
 						for (k, v) in &tableDesc.key.fields { println!("  key.field {}:{}", k, v) };
 						for (k, v) in &tableDesc.value.fields { println!("  value.field {}:{}", k, v) };
-						client.app.getDataBaseManager().addTable(tableDesc);
+						client.app.get_data_base_manager().add_table(tableDesc);
 						client.set_status(rustless::server::status::StatusCode::Ok);
 						client.json(&_params.to_json())
 					})
@@ -279,7 +279,7 @@ fn main() {
 						let tableJson = _params
 								.find("name")
 								.and_then(|name| { name.as_str() })
-								.and_then(|name| { client.app.getDataBaseManager().getTable(&String::from(name)) });
+								.and_then(|name| { client.app.get_data_base_manager().get_table(&String::from(name)) });
 						match tableJson {
 							Some(value) => client.json(&value),
 							None => client.text(String::from("Table not found")), 
