@@ -174,6 +174,30 @@ impl Table {
 		}
 	}
 
+	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, String> {
+		let type_descs = entity.fields.iter().map(|(type_id, value)| {
+			(type_id, 
+			value, 
+			entity_description.ids_map.get(type_id),
+			entity_description.ids_map.get(type_id).and_then(|type_name| entity_description.fields.get(type_name)) )
+		}).collect();
+		let unset_fields = type_descs.iter()
+				.filter(|(type_id, value, field_name, type_desc)| type_desc.is_none() || field_name.is_none() )
+				.collect();
+		if unset_fields.count() >0 {
+			Err(unset_fields.iter().fold(
+				String::from("Not found relations for types: "), 
+				|acc, (type_id, value, type_desc)| 
+					acc + ", " + type_id.to_string() + ":" + entity_description.ids_map.get(type_id).get_or("")))
+		} else {
+			Ok(rustless::json::JsonValue::Object(type_descs.iter()
+				.filter_map(|(type_id, value, field_name, type_desc)| 
+					type_desc.and_then(|type_desc| field_name.map(|field_name| (type_id, value, field_name, type_desc)) ))
+				.map(|(type_id, value, field_name, type_desc)| (field_name, type_descs.writer(value)) )
+				.collect::<BTreeMap<String, rustless::json::JsonValue>>()))
+		}
+	}
+
 	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) {
 		let key_entity = Table::read_entity(key, &self.description.key);
 		let value_entity = Table::read_entity(value, &self.description.value);
@@ -184,6 +208,19 @@ impl Table {
 		}).map(|(k, v)| {
 			self.data.insert(k, v)
 		});
+	}
+
+	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Opition<rustless::json::JsonValue>, String> {
+		let key_entity = read_entity(key, self.description.key);
+		match key_entity {
+			Ok(key_entity) => {
+				match self.data.find(&key_entity) {
+					Some(data) => entity_to_json(data, &self.description.value).map(|json_entity| Some(json_entity)),
+					None => Ok(None)
+				}
+			},
+			Err(message) => Err(message)
+		}
 	}
 }
 // For getting from frontend
@@ -360,6 +397,16 @@ impl DataBaseManager {
 				Ok(())
 			},
 			None => Err("Table with name ".to_string() + table_name.clone().as_str() + " not found.")
+		}
+	}
+
+	pub fn get_data(&self,
+			table_name: &String,
+			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
+		let table = self.tables.find(table_name);
+		match table {
+			Some(table) => table.get(key),
+			None => Ok(None)
 		}
 	}
 }

@@ -239,6 +239,30 @@ fn main() {
 				})
 			});
 
+			cache_api.get("get/:table_name", |endpoint| {
+				endpoint.params(|params| {
+					params.req_typed("table_name", json_dsl::string());
+					params.req("key", |key| {})
+				});
+
+				endpoint.handle(|mut client, params| {
+					match params
+							.find("table_name")
+							.and_then(|table_name| table_name.as_str())
+							.and_then(|table_name| params.fing("key").map(|key| {(table_name, key)} )) {
+						Some((table_name, key)) => {
+							let db_manager = client.app.get_data_base_manager();
+							let value = db_manager.get_data(table_name, key);
+							match value {
+								Ok(value) => client.json(&value),
+								Err(message) => client.text(message)
+							}
+						},
+						None => client.text("Not foud one or both parameters: table_name, key.")
+					}
+				})
+			});
+
 			cache_api.namespace("meta", |meta_ns| {
 				meta_ns.post("table", |endpoint| {
 					println!("Table update");
