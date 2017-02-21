@@ -16,6 +16,8 @@ use std::sync::Arc;
 use std::boxed::Box;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::collections::VecDeque;
+
 use bincode::rustc_serialize::{encode, decode};
 
 use std::str::FromStr;
@@ -125,7 +127,7 @@ pub struct Table {
 }
 
 impl Table {
-	fn read_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
+	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
 		println!("Begin put data {}", json);
 		if json.is_object() {
 			let json_object = json.as_object();
@@ -179,16 +181,16 @@ impl Table {
 			(type_id, 
 			value, 
 			entity_description.ids_map.get(type_id),
-			entity_description.ids_map.get(type_id).and_then(|type_name| entity_description.fields.get(type_name)) )
-		}).collect();
+			entity_description.ids_map.get(type_id).and_then(|type_name| entity_description.fields.get(type_name).map(Arc::clone)) )
+		}).collect::<VecDeque<(&u16, &Field, Option<&String>, Option<Arc<Box<TypeDescription>>>)>>();
 		let unset_fields = type_descs.iter()
-				.filter(|(type_id, value, field_name, type_desc)| type_desc.is_none() || field_name.is_none() )
-				.collect();
+				.filter(|&&(type_id, value, field_name, type_desc)| type_desc.is_none() || field_name.is_none() )
+				.collect::<VecDeque<&(&u16, &Field, Option<&String>, Option<Arc<Box<TypeDescription>>>)>>();
 		if unset_fields.count() >0 {
 			Err(unset_fields.iter().fold(
 				String::from("Not found relations for types: "), 
 				|acc, (type_id, value, type_desc)| 
-					acc + ", " + type_id.to_string() + ":" + entity_description.ids_map.get(type_id).get_or("")))
+					acc + ", " + type_id.to_string() + ":" + entity_description.ids_map.get(type_id).ok_or("")))
 		} else {
 			Ok(rustless::json::JsonValue::Object(type_descs.iter()
 				.filter_map(|(type_id, value, field_name, type_desc)| 
@@ -199,8 +201,8 @@ impl Table {
 	}
 
 	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) {
-		let key_entity = Table::read_entity(key, &self.description.key);
-		let value_entity = Table::read_entity(value, &self.description.value);
+		let key_entity = Table::json_to_entity(key, &self.description.key);
+		let value_entity = Table::json_to_entity(value, &self.description.value);
 		key_entity.and_then(|key_entity| { 
 			value_entity.map(|value_entity| { 
 				(key_entity, value_entity) 
@@ -210,12 +212,12 @@ impl Table {
 		});
 	}
 
-	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Opition<rustless::json::JsonValue>, String> {
-		let key_entity = read_entity(key, self.description.key);
+	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
+		let key_entity = Table::json_to_entity(key, self.description.key);
 		match key_entity {
 			Ok(key_entity) => {
 				match self.data.find(&key_entity) {
-					Some(data) => entity_to_json(data, &self.description.value).map(|json_entity| Some(json_entity)),
+					Some(data) => Table::entity_to_json(data, &self.description.value).map(|json_entity| Some(json_entity)),
 					None => Ok(None)
 				}
 			},
