@@ -3,31 +3,24 @@ extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate serde_json;
 
-use rustc_serialize::json;
-use rustc_serialize::json::Json;
 use rustless::json::ToJson;
 
 use concurrent_hashmap::*;
 use std::collections::BTreeMap;
-use std::hash::Hash;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::boxed::Box;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::collections::VecDeque;
 use std;
 use std::fmt::{Debug, Display};
 
 use bincode::rustc_serialize::{encode, decode};
 
-use std::str::FromStr;
-
 use rustless::{self, Extensible};
 
 // Type trait, that allow define user type
-struct TypeDescription {
+pub struct TypeDescription {
 	name: String,
 	reader: Box<Fn(&rustless::json::JsonValue) -> Vec<u8>>,
 	writer: Box<Fn(&Vec<u8>) -> rustless::json::JsonValue>,
@@ -76,7 +69,7 @@ impl PartialEq for Field {
 #[derive(Debug)]
 #[derive(Eq)]
 #[derive(Hash)]
-struct Entity {
+pub struct Entity {
 	fields: BTreeMap<u16, Field>,
 }
 
@@ -97,15 +90,18 @@ impl EntityDescription {
 
 	fn from_fields(fields: BTreeMap<String, Arc<Box<TypeDescription>>>) -> EntityDescription {
 		let count = AtomicUsize::new(0);
-		let mut ids_map = fields.iter()
-				.map(|(k, v)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
+		let ids_map = fields.iter()
+				.map(|(k, _)| { (count.fetch_add(1, Ordering::Relaxed) as u16, k.clone()) })
 				.collect::<BTreeMap<u16, String>>(); //BTreeMap::<u16, String>::new();
-		let mut reverse_ids_map = ids_map.iter().map(|(k, v)| { (v.clone(), k.clone()) }).collect::<BTreeMap<String, u16>>();
+		let reverse_ids_map = ids_map.iter().map(|(k, v)| { (v.clone(), k.clone()) }).collect::<BTreeMap<String, u16>>();
 		EntityDescription { count: count, fields: fields, ids_map: ids_map, reverse_ids_map: reverse_ids_map }
 	}
 
-	fn addField(&mut self, name: String, typeDesc: TypeDescription) {
-
+	fn add_field(&mut self, name: String, type_desc: TypeDescription) {
+		self.fields.insert(name.clone(), Arc::new(Box::new(type_desc)));
+		let id = self.count.fetch_add(1, Ordering::Relaxed) as u16;
+		self.ids_map.insert(id.clone(), name.clone());
+		self.reverse_ids_map.insert(name.clone(), id.clone());
 	}
 }
 
@@ -131,13 +127,13 @@ pub struct Table {
 }
 
 #[derive(Debug)]
-enum IoEntityError {
+pub enum IoEntityError {
 	Read(String),
 	Write(String),
 }
 
 #[derive(Debug)]
-enum PersistenceError {
+pub enum PersistenceError {
 	IoEntity(IoEntityError),
 	TableNotFound(String),
 	EntityNotFound(Entity),
@@ -182,7 +178,7 @@ impl Table {
 						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]"))
 				}
 				else {
-					let fields = selected_values.iter().map(|(name, &(&field_id, ref type_desc, ref value))| 
+					let fields = selected_values.iter().map(|(_, &(&field_id, ref type_desc, ref value))| 
 							(field_id, Field { data: (type_desc.reader)(&value) }))
 						.collect();
 					Ok( Entity { fields: fields } )
@@ -210,12 +206,12 @@ impl Table {
 
 		if json_object.len() != entity.fields.len() {
 			let unset = entity.fields.iter()
-				.filter(|&(&type_id, value)| 
+				.filter(|&(&type_id, _)| 
 					entity_description.ids_map
 						.get(&type_id)
 						.and_then(|name| entity_description.fields.get(name) )
 						.is_none())
-				.map(|(type_id, value)| type_id.to_string())
+				.map(|(type_id, _)| type_id.to_string())
 				.fold(String::new(), |acc, type_id| acc + ", " + type_id.as_str());
 			Err(IoEntityError::Write("Not found field descriptions for some fields ".to_string() + unset.as_str()))
 		} else {
@@ -226,7 +222,8 @@ impl Table {
 	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
-		self.data.insert(key_entity, value_entity).map(|e| ()).ok_or(PersistenceError::Undefined("Cannot write. I don't know what.".to_string()))
+		self.data.insert(key_entity, value_entity);//.ok_or(PersistenceError::Undefined("Cannot write. I don't know what.".to_string()))
+		Ok(())
 	}
 
 	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
@@ -256,13 +253,13 @@ pub struct DataBaseManager {
 	tables: ConcHashMap<String, Table>,
 }
 
-fn read(ed: &EntityDescription, jsonString: String) -> HashMap<String, Vec<u8>> {
-	let data = rustless::json::JsonValue::from_str(&jsonString).unwrap();
+/*fn read(ed: &EntityDescription, json_string: String) -> HashMap<String, Vec<u8>> {
+	let data = rustless::json::JsonValue::from_str(&json_string).unwrap();
 	let object = data.as_object().unwrap();
 	let mut res = HashMap::new();
 	for (key, value) in object.iter() {
 		match ed.fields.get(key) {
-			Some(typeDesc) => res.insert(key.clone(), (typeDesc.reader)(value)),
+			Some(type_desc) => res.insert(key.clone(), (type_desc.reader)(value)),
 			None => panic!("Type for key {} not found", key),
 		};
 	};
@@ -270,30 +267,30 @@ fn read(ed: &EntityDescription, jsonString: String) -> HashMap<String, Vec<u8>> 
 }
 
 fn write(ed: &EntityDescription, data: HashMap<String, Vec<u8>>) -> rustless::json::JsonValue {
-	let mut jsonObject = BTreeMap::<String, rustless::json::JsonValue>::new();
+	let mut json_object = BTreeMap::<String, rustless::json::JsonValue>::new();
 	for (key, value) in data.iter() {
 		match ed.fields.get(key) {
-			Some(typeDesc) => jsonObject.insert(key.clone(), (typeDesc.writer)(value)),
+			Some(type_desc) => json_object.insert(key.clone(), (type_desc.writer)(value)),
 			None => panic!("Type for key {} not found", key),
 		};
 	};
-	rustless::json::JsonValue::Object(jsonObject)
-}
+	rustless::json::JsonValue::Object(json_object)
+}*/
 
-fn getUndefinedFields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescription>>> >) -> Vec<String> {
+fn get_undefined_fields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescription>>> >) -> Vec<String> {
 	entity_fields.iter().filter_map(|(k, v)| { match *v {
-		Some(ref typeDesc) => None,
+		Some(_) => None,
 		None => Some(k.clone()),
 	}}).collect::<Vec<String>>()
 }
 
 fn create_entity_description(
 		view: &EntityDescriptionView, 
-		typeDescs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
+		type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
 	let mut entity_fields = view.fields.iter().map(|(k, v)| {
-		(k.clone(), typeDescs.get(v).map(|typeDesc| { typeDesc.clone() }))
+		(k.clone(), type_descs.get(v).map(|type_desc| { type_desc.clone() }))
 	}).collect();
-	let undefined_fields: Vec<String> = getUndefinedFields(&entity_fields);
+	let undefined_fields: Vec<String> = get_undefined_fields(&entity_fields);
 	if undefined_fields.iter().next().is_some() {
 		Err(undefined_fields.iter().fold(String::new(), |base, field_name| { base + ", " + field_name.as_str() }))
 	}
@@ -303,22 +300,22 @@ fn create_entity_description(
 	}
 }
 
-fn create_table_description(view: &TableDescriptionView, typeDescs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> TableDescription {
+fn create_table_description(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> TableDescription {
 	TableDescription { 
 		name: view.name.clone(),
-		key: create_entity_description(&view.key, typeDescs).unwrap(),
-		value: create_entity_description(&view.value, typeDescs).unwrap()
+		key: create_entity_description(&view.key, type_descs).unwrap(),
+		value: create_entity_description(&view.value, type_descs).unwrap()
 	}
 }
 
 impl DataBaseManager {
-    pub fn new() -> DataBaseManager {
+    pub fn new() -> Result<DataBaseManager, String> {
         let mut db_manager = DataBaseManager { 
             type_descriptions: BTreeMap::new(),
             table_descriptions: ConcHashMap::<String, TableDescription>::new(),
 			tables: ConcHashMap::<String, Table>::new() };
 
-        let stringType = TypeDescription {
+        let string_type = TypeDescription {
             name: "String".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
@@ -332,7 +329,7 @@ impl DataBaseManager {
             }),
         };
 
-        let u64Type = TypeDescription {
+        let u64_type = TypeDescription {
             name: "u64".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
@@ -345,26 +342,10 @@ impl DataBaseManager {
             }),
         };
 
-		db_manager.add_type(u64Type);
-		db_manager.add_type(stringType);
+		try!(db_manager.add_type(u64_type));
+		try!(db_manager.add_type(string_type));
 
-        //db_manager.type_descriptions.insert(stringType.name.clone(), stringType.clone());
-        //db_manager.type_descriptions.insert(u64Type.name.clone(), u64Type.clone());
-        
-        /*let mut ed = EntityDescription::blank();
-        ed.fields.insert("id".to_string(), u64Type.clone());
-        ed.fields.insert("code".to_string(), stringType.clone());
-        ed.fields.insert("name".to_string(), stringType.clone());
-
-        let testString = "{\"id\": 0, \"code\": \"Test code 5464565\", \"name\": \"John Doe\"}".to_string();
-        let readed = read(&ed, testString);
-
-        println!("### = {:?}", readed);
-
-        let writed = write(&ed, readed);
-        println!("$$$ = {}", writed);*/
-
-        db_manager
+        Ok(db_manager)
     }
 
 	pub fn add_type(&mut self, type_desc: TypeDescription) -> Result<(), String> {

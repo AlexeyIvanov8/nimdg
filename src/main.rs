@@ -10,58 +10,39 @@ extern crate iron;
 extern crate rustless;
 extern crate serde_json;
 
-use rustc_serialize::json;
-use rustc_serialize::json::Json;
 use std::collections::BTreeMap;
-use std::boxed::Box;
-use std::borrow::Borrow;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::hash::Hash;
-use std::cmp::Eq;
-use std::collections::HashMap;
-use std::fmt::Display;
 
 use valico::json_dsl;
-use rustless::prelude::*;
-use iron::status;
-use iron::method;
-use std::io::Read;
-use rustless::json::ToJson;
 use rustless::batteries::swagger;
 use std::str::FromStr;
-use rustless::errors::Error;
 
 use rustless::{
     Application, Api, Nesting, Versioning
 };
-
-use concurrent_hashmap::*;
-use std::sync::Arc;
 
 mod data_base;
 
 use self::data_base::{DataBaseExtension, EntityDescriptionView, TableDescriptionView};
 
 // reading views from rustless json
-fn readEntityDescriptionView(json: &BTreeMap<String, rustless::json::JsonValue>) -> EntityDescriptionView {
+fn read_entity_description_view(json: &BTreeMap<String, rustless::json::JsonValue>) -> EntityDescriptionView {
 	let fields_object = json.get("fields").unwrap().as_object().unwrap();
 	let fields = fields_object.iter().map(|(k, v)| { (k.clone(), String::from(v.as_str().unwrap()) ) }).collect();
 	//for (k, v) in fields { println!("Field {} = {}", k, v) };
 	EntityDescriptionView { fields: fields }
 }
 
-fn readTableDescriptionView(json: &rustless::json::JsonValue) -> TableDescriptionView {
+fn read_table_description_view(json: &rustless::json::JsonValue) -> TableDescriptionView {
 	let name = json.find("name").unwrap().as_str().unwrap();
 	println!("Found cache desc with name = {}", name);
-	let key = readEntityDescriptionView(json.find("key").unwrap().as_object().unwrap());
-	let value = readEntityDescriptionView(json.find("value").unwrap().as_object().unwrap());
+	let key = read_entity_description_view(json.find("key").unwrap().as_object().unwrap());
+	let value = read_entity_description_view(json.find("value").unwrap().as_object().unwrap());
 	TableDescriptionView { name: String::from(name), key: key, value: value }
 }
 
 fn run_data_base_manager(app: &mut rustless::Application) {
 	let data_base_manager = data_base::DataBaseManager::new();
-	app.ext.insert::<data_base::AppDataBase>(data_base_manager);
+	app.ext.insert::<data_base::AppDataBase>(data_base_manager.unwrap());
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -120,7 +101,7 @@ fn main() {
 			});
 
 			cache_api.get("info", |endpoint| {
-				endpoint.handle(|client, params| {
+				endpoint.handle(|client, _| {
 					let db_manager = client.app.get_data_base_manager();
 					db_manager.print_info();
 					//client.text("Some usefull info".to_string())
@@ -131,18 +112,16 @@ fn main() {
 			cache_api.post("put/:table_name", |endpoint| {
 				endpoint.params(|params| {
 					params.req_typed("table_name", json_dsl::string());
-					params.req("data", |data| {
-
-					})
+					params.req("data", |_| {})
 				});
-				endpoint.handle(|mut client, params| {
+				endpoint.handle(|client, params| {
 					match get_key_and_value(params) {
 						Ok((key, value)) => {
 							let db_manager = client.app.get_data_base_manager();
 							let res = db_manager.add_data(&String::from(params.find("table_name").unwrap().as_str().unwrap()),
 								&key, &value);
 							match res {
-								Ok(res) => client.text("Done".to_string()),
+								Ok(_) => client.text("Done".to_string()),
 								Err(err) => client.text(err.to_string())
 							}
 						},
@@ -154,11 +133,10 @@ fn main() {
 			cache_api.get("get/:table_name", |endpoint| {
 				endpoint.params(|params| {
 					params.req_typed("table_name", json_dsl::string());
-					params.req("key", |key| {
-					})
+					params.req("key", |_| {})
 				});
 
-				endpoint.handle(|mut client, params| {
+				endpoint.handle(|client, params| {
 					let table_name = params.find("table_name").and_then(|table_name| table_name.as_str());
 					let key = params.find("key").and_then(|key| key.as_str()).map(|key| rustless::json::JsonValue::from_str(key));
 					match key.and_then(|key| table_name.map(|table_name| (table_name, key)) ) {
@@ -208,8 +186,8 @@ fn main() {
 
 					endpoint.handle(|mut client, _params| {
 						let cache_desc = _params.find("data").unwrap();
-						let tableDesc = readTableDescriptionView(cache_desc);
-						match client.app.get_data_base_manager().add_table(tableDesc) {
+						let table_desc = read_table_description_view(cache_desc);
+						match client.app.get_data_base_manager().add_table(table_desc) {
 							Ok(name) => {
 								client.set_status(rustless::server::status::StatusCode::Ok);
 								client.text("Table with name ".to_string() + name.as_str() + " succefully added")
@@ -240,14 +218,6 @@ fn main() {
 							},
 							None => client.text("Parameter table name not found.".to_string())
 						}
-						/*let table_json = params
-								.find("name")
-								.and_then(|name| { name.as_str() })
-								.and_then(|name| { client.app.get_data_base_manager().get_table(&String::from(name)) });
-						match table_json {
-							Some(value) => client.json(&value),
-							None => , 
-						}*/
 					})
 				});
 			});
