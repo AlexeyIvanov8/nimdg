@@ -408,13 +408,10 @@ impl DataBaseManager {
 	pub fn add_data(&self,
 			table_name: &String, 
 			key: &rustless::json::JsonValue,
-			value: &rustless::json::JsonValue) -> Result<(), String> {
+			value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		match self.tables.find(table_name) {
-			Some(table) => { 
-				table.get().put(key, value);
-				Ok(())
-			},
-			None => Err("Table with name ".to_string() + table_name.clone().as_str() + " not found.")
+			Some(table) => table.get().put(key, value),
+			None => Err(PersistenceError::TableNotFound(table_name.clone()))
 		}
 	}
 

@@ -43,79 +43,6 @@ mod data_base;
 
 use self::data_base::{DataBaseExtension, EntityDescriptionView, TableDescriptionView};
 
-trait BaseStoredValue {}
-
-// Base trait for value, that can be stored in cache
-trait StoredValue<V: Clone> : BaseStoredValue {
-	fn get(&self) -> V;
-	fn set(&mut self, value: V);
-}
-
-// Predefined types
-#[derive(Hash)]
-struct StringValue(String);
-
-#[derive(Hash)]
-struct U32Value(u32);
-
-impl BaseStoredValue for StringValue {}
-impl StoredValue<String> for StringValue {
-	fn get(&self) -> String {
-		self.0.clone()
-	}
-	fn set(&mut self, value: String) {
-		self.0 = value;
-	}
-}
-
-impl BaseStoredValue for U32Value {}
-impl StoredValue<u32> for U32Value {
-	fn get(&self) -> u32 {
-		self.0
-	}
-	fn set(&mut self, value: u32) {
-		self.0 = value;
-	}
-}
-
-// Cache value
-#[derive(Hash)]
-struct CacheValue {
-	//values: Vec<Box<BaseStoredValue>>,
-}
-
-impl CacheValue {
-	/*fn get<V: Clone, SV: StoredValue<V>>(&self, index:usize) -> V {
-		let box_ref = self.values.get(index).unwrap();
-		let reference = box_ref.deref();
-		let raw = reference as *const BaseStoredValue;
-		let sv_raw = raw as *const SV;
-		let value = unsafe { (*sv_raw).get().clone() };
-		value
-	}*/
-}
-
-/*impl PartialEq for CacheValue {
-    fn eq(&self, other: &CacheValue) -> bool {
-        self.values == other.values
-    }
-}
-impl Eq for CacheValue {}*/
-
-/*impl Eq for CacheValue {
-	fn eq(&self, other: CacheValue) -> bool {
-		self.vec == other.vec
-	}
-}*/
-
-struct Cache {
-	map: Arc<BTreeMap<CacheValue, CacheValue>>,
-}
-
-struct Entity {
-
-}
-
 // reading views from rustless json
 fn readEntityDescriptionView(json: &BTreeMap<String, rustless::json::JsonValue>) -> EntityDescriptionView {
 	let fields_object = json.get("fields").unwrap().as_object().unwrap();
@@ -168,57 +95,16 @@ impl std::fmt::Display for GettingParamsError {
     }
 }
 
+fn get_key_and_value(params: &rustless::json::JsonValue) -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
+	let data = try!(params.find("data").and_then(|data| data.as_object()).ok_or("Param data not found"));
+	let key = try!(data.get("key").ok_or("Attribute key not found"));
+	let value = try!(data.get("value").ok_or("Attribute value not found"));
+	Ok((&key, &value))
+}
+
 fn main() {
 
     println!("Hello, world!");
-    let test = TestStruct {
-    	data_int: 9,
-    	data_str: "test r".to_string(),
-    	data_vector: vec![4, 5, 2],
-    };
-
-	let encoded = json::encode(&test).unwrap();
-	let decoded: TestStruct = json::decode(&encoded).unwrap();
-
-	println!("Enc = {}, dec = {}", encoded, decoded.data_str);
-
-	let json_string = "{
-		\"foo\": \"test string\",
-		\"data_int\": 9,
-		\"data_str\": \"test r\",
-		\"data_vector\": [4,5,2]
-	}".to_string();
-	let data = Json::from_str(&json_string).unwrap();
-	println!("Data: {}", data);
-	println!("Data is object = {}", data.is_object());
-
-	let obj = data.as_object().unwrap();
-	let foo = obj.get("foo").unwrap();
-
-	println!("Array? {:?}", obj);
-	println!("Str? {:?}", foo);
-
-	for (key, value) in obj.iter() {
-		println!("{}: {}", key, match *value {
-            Json::U64(v) => format!("{} (u64)", v),
-            Json::String(ref v) => format!("{} (string)", v),
-            Json::Array(ref arr) => {
-            	arr.iter()
-            		.map(|elt| format!("{:?}", elt) )
-            		.fold("Arr[".to_string(), |mut acc, i| { 
-            			acc.push_str(i.as_str()); acc 
-            		})
-            },
-            _ => format!("other")
-        });
-	}
-
-	/*let mut cv = CacheValue { values: vec![
-		Box::new(StringValue { value: "Test str".to_string() }), 
-		Box::new(U32Value { value: 345 }) ]};
-	//println!("Cache value = {:?}", cv.get2::<u32, U32Value>(1));
-	println!("Cache value = {:?}", cv.get::<u32, U32Value>(1));
-	println!("Cache value = {:?}", cv.get::<String, StringValue>(0));*/
 
 	let api = Api::build(|api| {
 		api.version("v1", Versioning::Path);
@@ -250,18 +136,18 @@ fn main() {
 					})
 				});
 				endpoint.handle(|mut client, params| {
-					match params
-							.find("data")
-							.and_then(|data| data.as_object()) {
-						Some(data) => {
+					match get_key_and_value(params) {
+						Ok((key, value)) => {
 							let db_manager = client.app.get_data_base_manager();
-							db_manager.add_data(&String::from(params.find("table_name").unwrap().as_str().unwrap()),
-								data.get("key").unwrap(),
-								data.get("value").unwrap());
+							let res = db_manager.add_data(&String::from(params.find("table_name").unwrap().as_str().unwrap()),
+								&key, &value);
+							match res {
+								Ok(res) => client.text("Done".to_string()),
+								Err(err) => client.text(err.to_string())
+							}
 						},
-						None => {}
-					};
-					client.text("Done".to_string())
+						Err(message) => client.text(message)
+					}
 				})
 			});
 
