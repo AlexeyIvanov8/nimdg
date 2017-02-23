@@ -57,6 +57,7 @@ impl ToJson for EntityDescription {
 	}
 }
 
+#[derive(Debug)]
 #[derive(Eq)]
 #[derive(Hash)]
 struct Field {
@@ -70,6 +71,7 @@ impl PartialEq for Field {
     }
 }
 
+#[derive(Debug)]
 #[derive(Eq)]
 #[derive(Hash)]
 struct Entity {
@@ -151,11 +153,11 @@ impl Table {
 				let types_keys = description.fields.keys().map(|key| key.clone()).collect::<HashSet<String>>();
 				let unselected_typed_keys = &selected_values_keys ^ &types_keys;
 
-				if !unselected_json_keys.is_empty() || unselected_typed_keys.is_empty() {
+				if !unselected_json_keys.is_empty() || !unselected_typed_keys.is_empty() {
 					Err("Found unselected json values = [".to_string() + 
 						unselected_json_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str())
+						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]")
 				}
 				else {
 					let fields = selected_values.iter().map(|(name, &(&field_id, ref type_desc, ref value))| 
@@ -177,26 +179,25 @@ impl Table {
 	}
 
 	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, String> {
-		let type_descs = entity.fields.iter().map(|(type_id, value)| {
-			(type_id, 
-			value, 
-			entity_description.ids_map.get(type_id),
-			entity_description.ids_map.get(type_id).and_then(|type_name| entity_description.fields.get(type_name).map(Arc::clone)) )
-		}).collect::<VecDeque<(&u16, &Field, Option<&String>, Option<Arc<Box<TypeDescription>>>)>>();
-		let unset_fields = type_descs.iter()
-				.filter(|&&(type_id, value, field_name, type_desc)| type_desc.is_none() || field_name.is_none() )
-				.collect::<VecDeque<&(&u16, &Field, Option<&String>, Option<Arc<Box<TypeDescription>>>)>>();
-		if unset_fields.count() >0 {
-			Err(unset_fields.iter().fold(
-				String::from("Not found relations for types: "), 
-				|acc, (type_id, value, type_desc)| 
-					acc + ", " + type_id.to_string() + ":" + entity_description.ids_map.get(type_id).ok_or("")))
+		let json_object: BTreeMap<String, rustless::json::JsonValue> = entity.fields.iter().filter_map(|(type_id, value)| {
+			let field_name = entity_description.ids_map.get(type_id);
+			let type_desc = field_name.and_then(|field_name| 
+				entity_description.fields.get(field_name).map(|type_desc| (field_name, type_desc)) );
+			type_desc.map(|(name, type_desc)| { (name.clone(), (type_desc.writer)(&value.data)) })
+		}).collect::<BTreeMap<String, rustless::json::JsonValue>>();
+
+		if json_object.len() != entity.fields.len() {
+			let unset = entity.fields.iter()
+				.filter(|&(&type_id, value)| 
+					entity_description.ids_map
+						.get(&type_id)
+						.and_then(|name| entity_description.fields.get(name) )
+						.is_none())
+				.map(|(type_id, value)| type_id.to_string())
+				.fold(String::new(), |acc, type_id| acc + ", " + type_id.as_str());
+			Err("Not found field descriptions for some fields ".to_string() + unset.as_str())
 		} else {
-			Ok(rustless::json::JsonValue::Object(type_descs.iter()
-				.filter_map(|(type_id, value, field_name, type_desc)| 
-					type_desc.and_then(|type_desc| field_name.map(|field_name| (type_id, value, field_name, type_desc)) ))
-				.map(|(type_id, value, field_name, type_desc)| (field_name, type_descs.writer(value)) )
-				.collect::<BTreeMap<String, rustless::json::JsonValue>>()))
+			Ok(rustless::json::JsonValue::Object(json_object))
 		}
 	}
 
@@ -213,11 +214,16 @@ impl Table {
 	}
 
 	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
-		let key_entity = Table::json_to_entity(key, self.description.key);
+		let key_entity = Table::json_to_entity(key, &self.description.key);
+		println!("Table name = {}, Key entity = {:?}", self.description.name, key_entity);
+		for (k, v) in self.data.iter() {
+			println!("  found key = {:?}", k); 
+		};
+		
 		match key_entity {
 			Ok(key_entity) => {
 				match self.data.find(&key_entity) {
-					Some(data) => Table::entity_to_json(data, &self.description.value).map(|json_entity| Some(json_entity)),
+					Some(data) => Table::entity_to_json(data.get(), &self.description.value).map(|json_entity| Some(json_entity)),
 					None => Ok(None)
 				}
 			},
@@ -374,7 +380,8 @@ impl DataBaseManager {
     }
 
 	pub fn get_table(&self, name: &String) -> Option<rustless::json::JsonValue> {
-		self.table_descriptions.find(name).map(|table| { table.get().to_json() })
+		//self.table_descriptions.find(name).map(|table| { table.get().to_json() })
+	self.tables.find(name).map(|table| { table.get().description.to_json() })
 	} 
 
 	/** Add new table by he view description
@@ -382,7 +389,8 @@ impl DataBaseManager {
     pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
 		if !self.table_descriptions.find(&table_description.name).is_some() {
         	let table_desc = create_table_description(&table_description, &self.type_descriptions);
-			self.table_descriptions.insert(table_desc.name.clone(), table_desc);
+			self.tables.insert(table_desc.name.clone(), Table { description: table_desc, data: ConcHashMap::<Entity, Entity>::new() });
+			//self.table_descriptions.insert(table_desc.name.clone(), table_desc);
 			Ok(table_description.name.clone())
 		} else {
 			Err("Table with name ".to_string() + table_description.name.as_str() + " already exists.")
@@ -407,7 +415,7 @@ impl DataBaseManager {
 			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
 		let table = self.tables.find(table_name);
 		match table {
-			Some(table) => table.get(key),
+			Some(table) => table.get().get(key),
 			None => Ok(None)
 		}
 	}

@@ -8,6 +8,7 @@ extern crate hyper;
 extern crate iron;
 #[macro_use]
 extern crate rustless;
+extern crate serde_json;
 
 use rustc_serialize::json;
 use rustc_serialize::json::Json;
@@ -28,6 +29,8 @@ use iron::method;
 use std::io::Read;
 use rustless::json::ToJson;
 use rustless::batteries::swagger;
+use std::str::FromStr;
+use rustless::errors::Error;
 
 use rustless::{
     Application, Api, Nesting, Versioning
@@ -141,6 +144,30 @@ pub struct TestStruct {
 	data_vector: Vec<u8>,
 }
 
+#[derive(Debug)]
+pub struct GettingParamsError {
+	param_names: Vec<String>
+}
+
+impl GettingParamsError {
+	fn get_description(&self) -> String {
+		self.param_names.iter().fold(String::from("Getting params error: "), |acc, name| acc + name + ";")
+	}
+}
+
+impl std::error::Error for GettingParamsError {
+    fn description(&self) -> &str {
+        /*let desc = self.get_description().clone();
+		&desc.as_str()*/ return ""
+    }
+}
+
+impl std::fmt::Display for GettingParamsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get_description())
+    }
+}
+
 fn main() {
 
     println!("Hello, world!");
@@ -242,24 +269,60 @@ fn main() {
 			cache_api.get("get/:table_name", |endpoint| {
 				endpoint.params(|params| {
 					params.req_typed("table_name", json_dsl::string());
-					params.req("key", |key| {})
+					params.req("key", |key| {
+						/*key.as_str()
+							ok_or("Cannot cast key param to string".to_string())
+							.and_then(|key| {
+								rustless::json::JsonValue::from_str(key)
+							})*/
+					})
 				});
 
 				endpoint.handle(|mut client, params| {
-					match params
+					let table_name = params.find("table_name").and_then(|table_name| table_name.as_str());
+					let key = params.find("key").and_then(|key| key.as_str()).map(|key| rustless::json::JsonValue::from_str(key));
+					match key.and_then(|key| table_name.map(|table_name| (table_name, key)) ) {
+						Some((table_name, key)) => {
+							match key {
+								Ok(key) => {
+									let db_manager = client.app.get_data_base_manager();
+									println!("key = {:?}", key);
+									let value = db_manager.get_data(&String::from(table_name), &key);
+									match value {
+										Ok(value) => 
+											match value {
+												Some(value) => client.json(&value),
+												None => client.text("Entity with key ".to_string() + key.to_string().as_str() + " not found")
+											},
+										Err(message) => client.text(message)
+									}
+								},
+								Err(message) => client.error(message)
+							}
+						},
+						None => client.error(GettingParamsError { param_names: vec!(String::from("table_name"), String::from("key")) })
+						
+					}
+					/*match params
 							.find("table_name")
 							.and_then(|table_name| table_name.as_str())
-							.and_then(|table_name| params.fing("key").map(|key| {(table_name, key)} )) {
+							.and_then(|table_name| params.find("key").map(|key| {(table_name, key)} )) {
 						Some((table_name, key)) => {
 							let db_manager = client.app.get_data_base_manager();
-							let value = db_manager.get_data(table_name, key);
+							//let test = ; // serde_json::to_value(key.as_str().unwrap());
+							println!("key = {:?}", key);
+							let value = db_manager.get_data(&String::from(table_name), key);
 							match value {
-								Ok(value) => client.json(&value),
+								Ok(value) => 
+									match value {
+										Some(value) => client.json(&value),
+										None => client.text("Entity with key ".to_string() + key.to_string().as_str() + " not found")
+									},
 								Err(message) => client.text(message)
 							}
 						},
-						None => client.text("Not foud one or both parameters: table_name, key.")
-					}
+						None => client.text("Not foud one or both parameters: table_name, key.".to_string())
+					}*/
 				})
 			});
 
