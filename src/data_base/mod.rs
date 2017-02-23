@@ -14,11 +14,12 @@ use concurrent_hashmap::*;
 use bincode::rustc_serialize::{encode, decode};
 
 use rustless::{self};
+use rustless::json::ToJson;
 
-mod app_extension;
-mod meta;
+pub mod app_extension;
+pub mod meta;
 
-use data_base::meta::{TypeDescription, EntityDescription, TableDescription};
+use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
 
 #[derive(Debug)]
 #[derive(Eq)]
@@ -169,37 +170,6 @@ pub struct DataBaseManager {
 	tables: ConcHashMap<String, Table>,
 }
 
-fn get_undefined_fields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescription>>> >) -> Vec<String> {
-	entity_fields.iter().filter_map(|(k, v)| { match *v {
-		Some(_) => None,
-		None => Some(k.clone()),
-	}}).collect::<Vec<String>>()
-}
-
-fn create_entity_description(
-		view: &EntityDescriptionView, 
-		type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
-	let mut entity_fields = view.fields.iter().map(|(k, v)| {
-		(k.clone(), type_descs.get(v).map(|type_desc| { type_desc.clone() }))
-	}).collect();
-	let undefined_fields: Vec<String> = get_undefined_fields(&entity_fields);
-	if undefined_fields.iter().next().is_some() {
-		Err(undefined_fields.iter().fold(String::new(), |base, field_name| { base + ", " + field_name.as_str() }))
-	}
-	else {
-		let entity_fields = entity_fields.iter_mut().filter_map(move |(k, v)| { v.clone().map(|value| { (k.clone(), value )}) }).collect();
-		Ok(EntityDescription::from_fields(entity_fields))
-	}
-}
-
-fn create_table_description(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> TableDescription {
-	TableDescription { 
-		name: view.name.clone(),
-		key: create_entity_description(&view.key, type_descs).unwrap(),
-		value: create_entity_description(&view.value, type_descs).unwrap()
-	}
-}
-
 impl DataBaseManager {
     pub fn new() -> Result<DataBaseManager, String> {
         let mut db_manager = DataBaseManager { 
@@ -269,7 +239,7 @@ impl DataBaseManager {
 	 * return - table name or error description is adding fail */
     pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
 		if !self.table_descriptions.find(&table_description.name).is_some() {
-        	let table_desc = create_table_description(&table_description, &self.type_descriptions);
+        	let table_desc = try!(TableDescription::from_view(&table_description, &self.type_descriptions));
 			self.tables.insert(table_desc.name.clone(), Table { description: table_desc, data: ConcHashMap::<Entity, Entity>::new() });
 			//self.table_descriptions.insert(table_desc.name.clone(), table_desc);
 			Ok(table_description.name.clone())

@@ -9,25 +9,25 @@ use rustless::{self};
 
 // Type trait, that allow define user type
 pub struct TypeDescription {
-	name: String,
-	reader: Box<Fn(&rustless::json::JsonValue) -> Vec<u8>>,
-	writer: Box<Fn(&Vec<u8>) -> rustless::json::JsonValue>,
+	pub name: String,
+	pub reader: Box<Fn(&rustless::json::JsonValue) -> Vec<u8>>,
+	pub writer: Box<Fn(&Vec<u8>) -> rustless::json::JsonValue>,
 }
 
 // Universal description of some entity. For example: key or value
 // For performance purposes each field is marked by number id
 pub struct EntityDescription {
 	count: AtomicUsize,
-	fields: BTreeMap<String, Arc<Box<TypeDescription>>>,
-	ids_map: BTreeMap<u16, String>,
-	reverse_ids_map: BTreeMap<String, u16>,
+	pub fields: BTreeMap<String, Arc<Box<TypeDescription>>>,
+	pub ids_map: BTreeMap<u16, String>,
+	pub reverse_ids_map: BTreeMap<String, u16>,
 }
 
 // Description of table, that is key-value cache 
 pub struct TableDescription {
-	name: String,
-	key: EntityDescription,
-	value: EntityDescription,
+	pub name: String,
+	pub key: EntityDescription,
+	pub value: EntityDescription,
 }
 
 // For getting from frontend
@@ -61,14 +61,13 @@ impl ToJson for EntityDescription {
 }
 
 impl EntityDescription {
-
     fn from_view(
             view: &EntityDescriptionView, 
 		    type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
         let mut entity_fields = view.fields.iter().map(|(k, v)| {
             (k.clone(), type_descs.get(v).map(|type_desc| { type_desc.clone() }))
         }).collect();
-        let undefined_fields: Vec<String> = get_undefined_fields(&entity_fields);
+        let undefined_fields: Vec<String> = EntityDescription::get_undefined_fields(&entity_fields);
         if undefined_fields.iter().next().is_some() {
             Err(undefined_fields.iter().fold(String::new(), |base, field_name| { base + ", " + field_name.as_str() }))
         }
@@ -76,6 +75,13 @@ impl EntityDescription {
             let entity_fields = entity_fields.iter_mut().filter_map(move |(k, v)| { v.clone().map(|value| { (k.clone(), value )}) }).collect();
             Ok(EntityDescription::from_fields(entity_fields))
         }
+    }
+
+    fn get_undefined_fields(entity_fields: &BTreeMap<String, Option<Arc<Box<TypeDescription>>> >) -> Vec<String> {
+        entity_fields.iter().filter_map(|(k, v)| { match *v {
+            Some(_) => None,
+            None => Some(k.clone()),
+        }}).collect::<Vec<String>>()
     }
 
 	fn blank() -> EntityDescription {
@@ -115,7 +121,7 @@ impl ToJson for TableDescription {
 }
 
 impl TableDescription {
-    fn from_view(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<TableDescription, String> {
+    pub fn from_view(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<TableDescription, String> {
         let key_desc = try!(EntityDescription::from_view(&view.key, type_descs));
         let value_desc = try!(EntityDescription::from_view(&view.value, type_descs));
         Ok(TableDescription { 

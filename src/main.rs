@@ -47,7 +47,7 @@ fn read_table_description_view(json: &rustless::json::JsonValue) -> TableDescrip
 
 fn run_data_base_manager(app: &mut rustless::Application) {
     let data_base_manager = data_base::DataBaseManager::new();
-    app.ext.insert::<data_base::AppDataBase>(data_base_manager.unwrap());
+    app.ext.insert::<data_base::app_extension::AppDataBase>(data_base_manager.unwrap());
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
