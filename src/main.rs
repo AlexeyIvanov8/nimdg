@@ -255,7 +255,6 @@ fn main() {
 							.and_then(|data| data.as_object()) {
 						Some(data) => {
 							let db_manager = client.app.get_data_base_manager();
-							println!("Found data for put");
 							db_manager.add_data(&String::from(params.find("table_name").unwrap().as_str().unwrap()),
 								data.get("key").unwrap(),
 								data.get("value").unwrap());
@@ -270,11 +269,6 @@ fn main() {
 				endpoint.params(|params| {
 					params.req_typed("table_name", json_dsl::string());
 					params.req("key", |key| {
-						/*key.as_str()
-							ok_or("Cannot cast key param to string".to_string())
-							.and_then(|key| {
-								rustless::json::JsonValue::from_str(key)
-							})*/
 					})
 				});
 
@@ -286,7 +280,6 @@ fn main() {
 							match key {
 								Ok(key) => {
 									let db_manager = client.app.get_data_base_manager();
-									println!("key = {:?}", key);
 									let value = db_manager.get_data(&String::from(table_name), &key);
 									match value {
 										Ok(value) => 
@@ -294,7 +287,7 @@ fn main() {
 												Some(value) => client.json(&value),
 												None => client.text("Entity with key ".to_string() + key.to_string().as_str() + " not found")
 											},
-										Err(message) => client.text(message)
+										Err(message) => client.text(message.to_string())
 									}
 								},
 								Err(message) => client.error(message)
@@ -303,26 +296,6 @@ fn main() {
 						None => client.error(GettingParamsError { param_names: vec!(String::from("table_name"), String::from("key")) })
 						
 					}
-					/*match params
-							.find("table_name")
-							.and_then(|table_name| table_name.as_str())
-							.and_then(|table_name| params.find("key").map(|key| {(table_name, key)} )) {
-						Some((table_name, key)) => {
-							let db_manager = client.app.get_data_base_manager();
-							//let test = ; // serde_json::to_value(key.as_str().unwrap());
-							println!("key = {:?}", key);
-							let value = db_manager.get_data(&String::from(table_name), key);
-							match value {
-								Ok(value) => 
-									match value {
-										Some(value) => client.json(&value),
-										None => client.text("Entity with key ".to_string() + key.to_string().as_str() + " not found")
-									},
-								Err(message) => client.text(message)
-							}
-						},
-						None => client.text("Not foud one or both parameters: table_name, key.".to_string())
-					}*/
 				})
 			});
 

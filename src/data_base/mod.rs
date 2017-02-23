@@ -17,6 +17,8 @@ use std::boxed::Box;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::collections::VecDeque;
+use std;
+use std::fmt::{Debug, Display};
 
 use bincode::rustc_serialize::{encode, decode};
 
@@ -137,14 +139,19 @@ enum IoEntityError {
 #[derive(Debug)]
 enum PersistenceError {
 	IoEntity(IoEntityError),
-	NotFoundTable(String),
-	NotFoundEntity(Entity),
+	TableNotFound(String),
+	EntityNotFound(Entity),
 	Undefined(String),
+}
+
+impl Display for PersistenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(self, f)
+    }
 }
 
 impl Table {
 	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
-		println!("Begin put data {}", json);
 		if json.is_object() {
 			let json_object = json.as_object();
 			let res = json_object.map(|object| {
@@ -413,12 +420,9 @@ impl DataBaseManager {
 
 	pub fn get_data(&self,
 			table_name: &String,
-			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
-		let table = self.tables.find(table_name);
-		match table {
-			Some(table) => table.get().get(key),
-			None => Ok(None)
-		}
+			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
+		table.get().get(key)
 	}
 }
 
