@@ -137,9 +137,9 @@ enum IoEntityError {
 #[derive(Debug)]
 enum PersistenceError {
 	IoEntity(IoEntityError),
-	NotFoundTable(name: String),
-	NotFoundEntity(key: Entity),
-	Undefined,
+	NotFoundTable(String),
+	NotFoundEntity(Entity),
+	Undefined(String),
 }
 
 impl Table {
@@ -219,30 +219,16 @@ impl Table {
 	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
-		key_entity.and_then(|key_entity| { 
-			value_entity.map(|value_entity| { 
-				(key_entity, value_entity) 
-			})
-		}).map(|(k, v)| {
-			self.data.insert(k, v)
-		}).ok_or(PersistenceError::Undefined("Cannot write. I don't know what.")) ;
+		self.data.insert(key_entity, value_entity).map(|e| ()).ok_or(PersistenceError::Undefined("Cannot write. I don't know what.".to_string()))
 	}
 
-	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
-		let key_entity = Table::json_to_entity(key, &self.description.key);
-		println!("Table name = {}, Key entity = {:?}", self.description.name, key_entity);
-		for (k, v) in self.data.iter() {
-			println!("  found key = {:?}", k); 
-		};
-		
-		match key_entity {
-			Ok(key_entity) => {
-				match self.data.find(&key_entity) {
-					Some(data) => Table::entity_to_json(data.get(), &self.description.value).map(|json_entity| Some(json_entity)),
-					None => Ok(None)
-				}
-			},
-			Err(message) => Err(message)
+	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		match self.data.find(&key_entity) {
+			Some(data) => Table::entity_to_json(data.get(), &self.description.value)
+				.map(|json_entity| Some(json_entity))
+				.map_err(|err| PersistenceError::IoEntity(err)),
+			None => Ok(None)
 		}
 	}
 }
