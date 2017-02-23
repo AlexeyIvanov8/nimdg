@@ -139,10 +139,11 @@ enum PersistenceError {
 	IoEntity(IoEntityError),
 	NotFoundTable(name: String),
 	NotFoundEntity(key: Entity),
+	Undefined,
 }
 
 impl Table {
-	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
+	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
 		println!("Begin put data {}", json);
 		if json.is_object() {
 			let json_object = json.as_object();
@@ -167,10 +168,11 @@ impl Table {
 				let unselected_typed_keys = &selected_values_keys ^ &types_keys;
 
 				if !unselected_json_keys.is_empty() || !unselected_typed_keys.is_empty() {
-					Err("Found unselected json values = [".to_string() + 
+					Err(IoEntityError::Read(
+						"Found unselected json values = [".to_string() + 
 						unselected_json_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + 
 						"] and unused entity fields =[" +
-						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]")
+						unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]"))
 				}
 				else {
 					let fields = selected_values.iter().map(|(name, &(&field_id, ref type_desc, ref value))| 
@@ -181,17 +183,17 @@ impl Table {
 			});
 			match res {
 				Some(value) => value,
-				None => Err("Json object not found".to_string()),
+				None => Err(IoEntityError::Read("Json object not found".to_string())),
 			}
 			/*description.fields.map(|(name, desc)| {
 				
 			})*/
 		} else {
-			Err("Not object".to_string())
+			Err(IoEntityError::Read("Not object".to_string()))
 		}
 	}
 
-	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, String> {
+	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, IoEntityError> {
 		let json_object: BTreeMap<String, rustless::json::JsonValue> = entity.fields.iter().filter_map(|(type_id, value)| {
 			let field_name = entity_description.ids_map.get(type_id);
 			let type_desc = field_name.and_then(|field_name| 
@@ -208,22 +210,22 @@ impl Table {
 						.is_none())
 				.map(|(type_id, value)| type_id.to_string())
 				.fold(String::new(), |acc, type_id| acc + ", " + type_id.as_str());
-			Err("Not found field descriptions for some fields ".to_string() + unset.as_str())
+			Err(IoEntityError::Write("Not found field descriptions for some fields ".to_string() + unset.as_str()))
 		} else {
 			Ok(rustless::json::JsonValue::Object(json_object))
 		}
 	}
 
-	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), String> {
-		let key_entity = Table::json_to_entity(key, &self.description.key);
-		let value_entity = Table::json_to_entity(value, &self.description.value);
+	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
+		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		key_entity.and_then(|key_entity| { 
 			value_entity.map(|value_entity| { 
 				(key_entity, value_entity) 
 			})
 		}).map(|(k, v)| {
 			self.data.insert(k, v)
-		});
+		}).ok_or(PersistenceError::Undefined("Cannot write. I don't know what.")) ;
 	}
 
 	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, String> {
