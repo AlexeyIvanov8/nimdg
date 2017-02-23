@@ -128,6 +128,19 @@ pub struct Table {
 	data: ConcHashMap<Entity, Entity>,
 }
 
+#[derive(Debug)]
+enum IoEntityError {
+	Read(String),
+	Write(String),
+}
+
+#[derive(Debug)]
+enum PersistenceError {
+	IoEntity(IoEntityError),
+	NotFoundTable(name: String),
+	NotFoundEntity(key: Entity),
+}
+
 impl Table {
 	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, String> {
 		println!("Begin put data {}", json);
@@ -201,7 +214,7 @@ impl Table {
 		}
 	}
 
-	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) {
+	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), String> {
 		let key_entity = Table::json_to_entity(key, &self.description.key);
 		let value_entity = Table::json_to_entity(value, &self.description.value);
 		key_entity.and_then(|key_entity| { 
