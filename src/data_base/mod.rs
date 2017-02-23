@@ -7,17 +7,18 @@ use std;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fmt::{Debug, Display};
 
 use concurrent_hashmap::*;
 
 use bincode::rustc_serialize::{encode, decode};
 
-use rustless::{self, Extensible};
+use rustless::{self};
 
 mod app_extension;
 mod meta;
+
+use data_base::meta::{TypeDescription, EntityDescription, TableDescription};
 
 #[derive(Debug)]
 #[derive(Eq)]

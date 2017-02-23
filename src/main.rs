@@ -20,7 +20,8 @@ use rustless::{Application, Api, Nesting, Versioning};
 
 mod data_base;
 
-use self::data_base::{DataBaseExtension, EntityDescriptionView, TableDescriptionView};
+use self::data_base::app_extension::DataBaseExtension;
+use self::data_base::meta::{EntityDescriptionView, TableDescriptionView};
 
 // reading views from rustless json
 fn read_entity_description_view(json: &BTreeMap<String, rustless::json::JsonValue>)

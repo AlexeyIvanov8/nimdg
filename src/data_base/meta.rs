@@ -1,7 +1,11 @@
 
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::boxed::Box;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustless::json::ToJson;
+use rustless::{self};
 
 // Type trait, that allow define user type
 pub struct TypeDescription {
@@ -57,6 +61,23 @@ impl ToJson for EntityDescription {
 }
 
 impl EntityDescription {
+
+    fn from_view(
+            view: &EntityDescriptionView, 
+		    type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {
+        let mut entity_fields = view.fields.iter().map(|(k, v)| {
+            (k.clone(), type_descs.get(v).map(|type_desc| { type_desc.clone() }))
+        }).collect();
+        let undefined_fields: Vec<String> = get_undefined_fields(&entity_fields);
+        if undefined_fields.iter().next().is_some() {
+            Err(undefined_fields.iter().fold(String::new(), |base, field_name| { base + ", " + field_name.as_str() }))
+        }
+        else {
+            let entity_fields = entity_fields.iter_mut().filter_map(move |(k, v)| { v.clone().map(|value| { (k.clone(), value )}) }).collect();
+            Ok(EntityDescription::from_fields(entity_fields))
+        }
+    }
+
 	fn blank() -> EntityDescription {
 		EntityDescription { count: AtomicUsize::new(0), 
 				fields: BTreeMap::new(), ids_map:
@@ -91,4 +112,16 @@ impl ToJson for TableDescription {
 		res.insert(String::from("value"), self.value.to_json());
 		rustless::json::JsonValue::Object(res)
 	}
+}
+
+impl TableDescription {
+    fn from_view(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<TableDescription, String> {
+        let key_desc = try!(EntityDescription::from_view(&view.key, type_descs));
+        let value_desc = try!(EntityDescription::from_view(&view.value, type_descs));
+        Ok(TableDescription { 
+            name: view.name.clone(),
+            key: key_desc,
+            value: value_desc
+        })
+    }
 }
