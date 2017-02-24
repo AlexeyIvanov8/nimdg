@@ -127,7 +127,10 @@ impl Table {
 		let json_object: BTreeMap<String, rustless::json::JsonValue> = entity.fields.iter().filter_map(|(type_id, value)| {
 			let field_name = entity_description.ids_map.get(type_id);
 			let type_desc = field_name.and_then(|field_name| 
-				entity_description.fields.get(field_name).map(|type_desc| (field_name, type_desc)) );
+				entity_description.fields
+					.get(field_name)
+					.map(|type_desc| (field_name, type_desc)) 
+			);
 			type_desc.map(|(name, type_desc)| { (name.clone(), (type_desc.writer)(&value.data)) })
 		}).collect::<BTreeMap<String, rustless::json::JsonValue>>();
 
