@@ -117,10 +117,14 @@ impl Table {
 					unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]"))
 			}
 			else {
-				let fields = selected_values.iter().map(|(_, &(&field_id, ref type_desc, ref value))| 
-						(field_id, Field { data: (type_desc.reader)(&value) }))
+				let fields: Result<BTreeMap<u16, Field>, _> = selected_values.iter()
+					.map(|(_, &(&field_id, ref type_desc, ref value))| 
+						((type_desc.reader)(&value)).map(|value| { 
+							(field_id, Field { data: value }) 
+						}))
 					.collect();
-				Ok( Entity { fields: fields } )
+				fields.map(|fields| Entity { fields: fields })
+				//Ok( Entity { fields: fields } )
 			}
 		} else {
 			Err(IoEntityError::Read("Not object".to_string()))
@@ -128,14 +132,14 @@ impl Table {
 	}
 
 	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, IoEntityError> {
-		let json_object: BTreeMap<String, rustless::json::JsonValue> = entity.fields.iter().filter_map(|(type_id, value)| {
+		let json_object: BTreeMap<String, rustless::json::JsonValue> = try!(entity.fields.iter().filter_map(|(type_id, value)| {
 			let field_name = entity_description.ids_map.get(type_id);
 			let type_desc = field_name.and_then(|field_name| 
 				entity_description.fields
 					.get(field_name)
 					.map(|type_desc| (field_name, type_desc)) );
-			type_desc.map(|(name, type_desc)| { (name.clone(), (type_desc.writer)(&value.data)) })
-		}).collect::<BTreeMap<String, rustless::json::JsonValue>>();
+			type_desc.map(|(name, type_desc)| { ((type_desc.writer)(&value.data)).map(|data| (name.clone(), data)) })
+		}).collect());//::<BTreeMap<String, rustless::json::JsonValue>>();
 
 		if json_object.len() != entity.fields.len() {
 			let unset = entity.fields.iter()
@@ -182,11 +186,11 @@ impl DataBaseManager {
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => 
-						encode(&value.clone(), bincode::SizeLimit::Infinite)map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => IoEntityError::Read(String::from("Expected type String"))
+						encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+                    _ => Err(IoEntityError::Read(String::from("Expected type String")))
                 }
             }),
-            writer: Box::new(move |value: &Vec<u8>| {
+            writer: Box::new(|value: &Vec<u8>| {
                 let string: String = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::String(string))
             })
@@ -198,11 +202,11 @@ impl DataBaseManager {
                 match json.clone() {
                     rustless::json::JsonValue::U64(value) =>
 						encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => IoEntityError::Read(String::from("Expected type u64"))
+                    _ => Err(IoEntityError::Read(String::from("Expected type u64")))
                 }
             }),
-            writer: Box::new(move |value| {
-				let u64_value = try!(decode(value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+            writer: Box::new(|ref value| {
+				let u64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::U64(u64_value))
             })
         };
@@ -211,16 +215,16 @@ impl DataBaseManager {
 			name: "i64".to_string(),
 			reader: Box::new(|ref json| {
 				match *json {
-					rustless::json::JsonValue::I64(ref value) => 
-						encode(value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-					_ => IoEntityError::Read(String::from("Expected type i64"))
+					&rustless::json::JsonValue::I64(value) => 
+						encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+					_ => Err(IoEntityError::Read(String::from("Expected type i64")))
 				}
 			}),
 			writer: Box::new(|ref value| {
-				let i64_value = try!(decode(value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+				let i64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
 				Ok(rustless::json::JsonValue::I64(i64_value))
 			})
-		}
+		};
 
 		try!(db_manager.add_type(u64_type));
 		try!(db_manager.add_type(string_type));

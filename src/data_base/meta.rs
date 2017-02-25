@@ -12,8 +12,8 @@ use data_base::IoEntityError;
 // Type trait, that allow define user type
 pub struct TypeDescription {
 	pub name: String,
-	pub reader: Box<Fn(&rustless::json::JsonValue) -> Result<Vec<u8>>, IoEntityError::Read>>,
-	pub writer: Box<Fn(&Vec<u8>) -> Result<rustless::json::JsonValue, IoEntityError::Write>>,
+	pub reader: Box<Fn(&rustless::json::JsonValue) -> Result<Vec<u8>, IoEntityError>>,
+	pub writer: Box<Fn(&Vec<u8>) -> Result<rustless::json::JsonValue, IoEntityError>>,
 }
 
 // Universal description of some entity. For example: key or value
