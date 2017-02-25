@@ -7,11 +7,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rustless::json::ToJson;
 use rustless::{self};
 
+use data_base::IoEntityError;
+
 // Type trait, that allow define user type
 pub struct TypeDescription {
 	pub name: String,
-	pub reader: Box<Fn(&rustless::json::JsonValue) -> Vec<u8>>,
-	pub writer: Box<Fn(&Vec<u8>) -> rustless::json::JsonValue>,
+	pub reader: Box<Fn(&rustless::json::JsonValue) -> Result<Vec<u8>>, IoEntityError::Read>>,
+	pub writer: Box<Fn(&Vec<u8>) -> Result<rustless::json::JsonValue, IoEntityError::Write>>,
 }
 
 // Universal description of some entity. For example: key or value
