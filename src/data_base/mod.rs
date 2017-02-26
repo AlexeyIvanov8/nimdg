@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use concurrent_hashmap::*;
 
@@ -50,6 +51,18 @@ pub struct Table {
 	data: ConcHashMap<Entity, Entity>,
 }
 
+// Struct for store data of transaction
+struct Transaction {
+	index: u32,
+	on: bool // true - transaction is executed
+}
+
+// Transactions data driver
+struct TransactionManager {
+	counter: Arc<Mutex<u32>>, // beacause need check overflow and get new value - AtomicUsize is not relevant
+	transactions: ConcHashMap<u32, Transaction>
+}
+
 // Errors
 #[derive(Debug)]
 pub enum IoEntityError {
@@ -63,6 +76,7 @@ pub enum PersistenceError {
 	TableNotFound(String),
 	EntityNotFound(Entity),
 	Undefined(String),
+	UndefinedTransaction,
 }
 
 impl Display for PersistenceError {
@@ -286,5 +300,36 @@ impl DataBaseManager {
 			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
 		table.get().get(key)
+	}
+}
+
+impl TransactionManager {
+	fn new() -> TransactionManager {
+		TransactionManager { counter: AtomicUsize::new(), transactions: ConcHashMap::<u32, Transaction>::new() }
+	}
+
+	fn get_tx_index(&self) -> u32 {
+		let counter = self.counter.clone();
+		let mut counter_mut = counter.lock().unwrap();
+		if counter_mut == core::u32::MAX {
+				counter_mut = 0;
+		};
+		let res = counter_mut.clone();
+		counter_mut = counter_mut + 1;
+		res
+	}
+	
+	fn start(&self) -> u32 {
+		let index = self.get_tx_index();
+		let transaction = Transaction { index: index, on: true };
+		self.transactions.insert(index, transaction);
+		index
+	}
+
+	fn stop(&self, index: u32) -> Result<(), PersistenceError> {
+		match self.transactions.remove(index) {
+			Some(transaction) => Ok(()),
+			None => Err(PersistenceError::UndefinedTransaction)
+		}
 	}
 }
