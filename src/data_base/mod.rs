@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use concurrent_hashmap::*;
 
@@ -305,17 +306,17 @@ impl DataBaseManager {
 
 impl TransactionManager {
 	fn new() -> TransactionManager {
-		TransactionManager { counter: AtomicUsize::new(), transactions: ConcHashMap::<u32, Transaction>::new() }
+		TransactionManager { counter: Arc::new(Mutex::new(0)), transactions: ConcHashMap::<u32, Transaction>::new() }
 	}
 
 	fn get_tx_index(&self) -> u32 {
 		let counter = self.counter.clone();
 		let mut counter_mut = counter.lock().unwrap();
-		if counter_mut == core::u32::MAX {
-				counter_mut = 0;
+		if counter_mut.eq(&u32::max_value()) {
+				*counter_mut = 0;
 		};
 		let res = counter_mut.clone();
-		counter_mut = counter_mut + 1;
+		*counter_mut = *counter_mut + 1;
 		res
 	}
 	
@@ -327,7 +328,7 @@ impl TransactionManager {
 	}
 
 	fn stop(&self, index: u32) -> Result<(), PersistenceError> {
-		match self.transactions.remove(index) {
+		match self.transactions.remove(&index) {
 			Some(transaction) => Ok(()),
 			None => Err(PersistenceError::UndefinedTransaction)
 		}
