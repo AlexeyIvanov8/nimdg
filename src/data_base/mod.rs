@@ -31,37 +31,46 @@ pub struct DataBaseManager {
 }
 
 // Field of entity
-#[derive(Debug)]
-#[derive(Eq)]
-#[derive(Hash)]
+#[derive(Debug, Eq, Hash, Clone)]
 struct Field {
 	data: Vec<u8>,
 }
 
 // Entity, that can be stored as key or value in table
-#[derive(Debug)]
-#[derive(Eq)]
-#[derive(Hash)]
+#[derive(Debug, Eq, Hash, Clone)]
 pub struct Entity {
 	fields: BTreeMap<u16, Field>,
+	lock: Lock
+}
+
+struct Lock {
+	on: bool,
+	type; LockType
+}
+
+enum LockType {
+	Read,
+	Write
 }
 
 // Persistence for concrete entity structure
 pub struct Table {
 	description: TableDescription,
 	data: ConcHashMap<Entity, Entity>,
+	tx_manager: Arc<TransactionManager>
 }
 
 // Struct for store data of transaction
 struct Transaction {
 	index: u32,
-	on: bool // true - transaction is executed
+	on: bool, // true - transaction is executed
+	locked_keys: HashSet<Entity> // keys of locked entities
 }
 
 // Transactions data driver
 struct TransactionManager {
 	counter: Arc<Mutex<u32>>, // beacause need check overflow and get new value - AtomicUsize is not relevant
-	transactions: ConcHashMap<u32, Transaction>
+	transactions: ConcHashMap<u32, Arc<Box<Transaction>>>
 }
 
 // Errors
@@ -97,6 +106,12 @@ impl PartialEq for Field {
 impl PartialEq for Entity {
 	fn eq(&self, other: &Entity) -> bool {
 		self.fields == other.fields
+	}
+}
+
+impl Lock {
+	fn new() -> Lock {
+		Lock { on: false, type: LockType::Read }
 	}
 }
 
@@ -185,6 +200,14 @@ impl Table {
 				.map(|json_entity| Some(json_entity))
 				.map_err(|err| PersistenceError::IoEntity(err)),
 			None => Ok(None)
+		}
+	}
+
+	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		self.tx_manager
+		if key_entity.lock.on {
+			
 		}
 	}
 }
@@ -320,9 +343,16 @@ impl TransactionManager {
 		res
 	}
 	
+	fn get_tx(&self, tx_id: u32) -> Result<Arc<Box<Transaction>>, PersistenceError> {
+		match self.transactions.find(tx_id) {
+			Some(transaction) => Ok(transaction.clone()),
+			None => Err(PersistenceError::UndefinedTransaction)
+		}
+	}
+
 	fn start(&self) -> u32 {
 		let index = self.get_tx_index();
-		let transaction = Transaction { index: index, on: true };
+		let transaction = Arc::new(Box::new(Transaction { index: index, on: true }));
 		self.transactions.insert(index, transaction);
 		index
 	}
