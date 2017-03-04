@@ -40,12 +40,12 @@ struct Field {
 #[derive(Debug, Eq, Hash, Clone)]
 pub struct Entity {
 	fields: BTreeMap<u16, Field>,
-	lock: Lock
+	lock: Mutex<Lock>
 }
 
 struct Lock {
 	on: bool,
-	type; LockType
+	type: LockType
 }
 
 enum LockType {
@@ -62,9 +62,9 @@ pub struct Table {
 
 // Struct for store data of transaction
 struct Transaction {
-	index: u32,
+	id: u32,
 	on: bool, // true - transaction is executed
-	locked_keys: HashSet<Entity> // keys of locked entities
+	locked_keys: ConcHashMap<Entity, MutexGuard<Lock>> // keys of locked entities
 }
 
 // Transactions data driver
@@ -193,22 +193,36 @@ impl Table {
 		Ok(())
 	}
 
-	pub fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
-		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+	fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		match self.data.find(&key_entity) {
-			Some(data) => Table::entity_to_json(data.get(), &self.description.value)
+			Some(data) => {
+				data.lock();
+				Table::entity_to_json(data.get(), &self.description.value)
 				.map(|json_entity| Some(json_entity))
-				.map_err(|err| PersistenceError::IoEntity(err)),
+				.map_err(|err| PersistenceError::IoEntity(err))
+			},
 			None => Ok(None)
 		}
 	}
 
-	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+	fn get_lock(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<bool, PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-		self.tx_manager
-		if key_entity.lock.on {
-			
-		}
+		let transaction = try!(self.tx_manager.get_tx(tx_id));
+		// Try get lock on key
+		if !key_entity.lock.on || !transaction.locked_keys.contains(key_entity) {
+			let lock_guard = key_entity.lock.lock();
+			transaction.locked_keys.inser(key_entity, lock_guard);
+		};
+		Ok(true)
+	}
+
+	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+		
+		get(key_entity)
+	}
+
+	pub fn tx_put(&self, tx_id: u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
+
 	}
 }
 
@@ -332,7 +346,7 @@ impl TransactionManager {
 		TransactionManager { counter: Arc::new(Mutex::new(0)), transactions: ConcHashMap::<u32, Transaction>::new() }
 	}
 
-	fn get_tx_index(&self) -> u32 {
+	fn get_tx_id(&self) -> u32 {
 		let counter = self.counter.clone();
 		let mut counter_mut = counter.lock().unwrap();
 		if counter_mut.eq(&u32::max_value()) {
@@ -351,14 +365,14 @@ impl TransactionManager {
 	}
 
 	fn start(&self) -> u32 {
-		let index = self.get_tx_index();
-		let transaction = Arc::new(Box::new(Transaction { index: index, on: true }));
-		self.transactions.insert(index, transaction);
-		index
+		let id = self.get_tx_id();
+		let transaction = Arc::new(Box::new(Transaction { id: id, on: true }));
+		self.transactions.insert(id, transaction);
+		id
 	}
 
-	fn stop(&self, index: u32) -> Result<(), PersistenceError> {
-		match self.transactions.remove(&index) {
+	fn stop(&self, id: u32) -> Result<(), PersistenceError> {
+		match self.transactions.remove(&id) {
 			Some(transaction) => Ok(()),
 			None => Err(PersistenceError::UndefinedTransaction)
 		}
