@@ -205,8 +205,7 @@ impl Table {
 		}
 	}
 
-	fn get_lock(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<bool, PersistenceError> {
-		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+	fn get_lock(&self, tx_id: u32, key_entity: Entity) -> Result<bool, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
 		if !key_entity.lock.on || !transaction.locked_keys.contains(key_entity) {
@@ -217,12 +216,16 @@ impl Table {
 	}
 
 	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
-		
+		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		try!(self.get_lock(tx_id, key_entity));
 		get(key_entity)
 	}
 
 	pub fn tx_put(&self, tx_id: u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
-
+		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
+		try!(self.get_lock(tx_id, key_entity));
+		self.data.upsert(key_entity, value_entity)
 	}
 }
 
@@ -373,7 +376,10 @@ impl TransactionManager {
 
 	fn stop(&self, id: u32) -> Result<(), PersistenceError> {
 		match self.transactions.remove(&id) {
-			Some(transaction) => Ok(()),
+			Some(transaction) => {
+				transaction.locked_keys..clear();
+				Ok(())
+			},
 			None => Err(PersistenceError::UndefinedTransaction)
 		}
 	}
