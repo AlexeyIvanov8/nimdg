@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use concurrent_hashmap::*;
 
@@ -45,7 +45,7 @@ pub struct Entity {
 
 struct Lock {
 	on: bool,
-	type: LockType
+	lock_type: LockType
 }
 
 enum LockType {
@@ -64,7 +64,7 @@ pub struct Table {
 struct Transaction {
 	id: u32,
 	on: bool, // true - transaction is executed
-	locked_keys: ConcHashMap<Entity, MutexGuard<Lock>> // keys of locked entities
+	locked_keys: ConcHashMap<Entity, MutexGuard<'static, Lock>> // keys of locked entities
 }
 
 // Transactions data driver
@@ -111,7 +111,7 @@ impl PartialEq for Entity {
 
 impl Lock {
 	fn new() -> Lock {
-		Lock { on: false, type: LockType::Read }
+		Lock { on: false, lock_type: LockType::Read }
 	}
 }
 
@@ -193,7 +193,7 @@ impl Table {
 		Ok(())
 	}
 
-	fn get(&self, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+	fn get(&self, key_entity: &Entity) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		match self.data.find(&key_entity) {
 			Some(data) => {
 				data.lock();
@@ -218,7 +218,7 @@ impl Table {
 	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		try!(self.get_lock(tx_id, key_entity));
-		get(key_entity)
+		self.get(&key_entity)
 	}
 
 	pub fn tx_put(&self, tx_id: u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
@@ -234,7 +234,8 @@ impl DataBaseManager {
         let mut db_manager = DataBaseManager { 
             type_descriptions: BTreeMap::new(),
             table_descriptions: ConcHashMap::<String, TableDescription>::new(),
-			tables: ConcHashMap::<String, Table>::new() };
+			tables: ConcHashMap::<String, Table>::new(),
+			tx_manager: Arc::new(TransactionManager::new()) };
 
         let string_type = TypeDescription {
             name: "String".to_string(),
@@ -369,7 +370,7 @@ impl TransactionManager {
 
 	fn start(&self) -> u32 {
 		let id = self.get_tx_id();
-		let transaction = Arc::new(Box::new(Transaction { id: id, on: true }));
+		let transaction = Arc::new(Box::new(Transaction { id: id, on: true, locked_keys: ConcHashMap::<Entity, MutexGuard<'static, Lock>>::new() }));
 		self.transactions.insert(id, transaction);
 		id
 	}
@@ -377,7 +378,7 @@ impl TransactionManager {
 	fn stop(&self, id: u32) -> Result<(), PersistenceError> {
 		match self.transactions.remove(&id) {
 			Some(transaction) => {
-				transaction.locked_keys..clear();
+				transaction.locked_keys.clear();
 				Ok(())
 			},
 			None => Err(PersistenceError::UndefinedTransaction)
