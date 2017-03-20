@@ -17,6 +17,7 @@ use rustless::batteries::swagger;
 use std::str::FromStr;
 
 use rustless::{Application, Api, Nesting, Versioning};
+use rustless::framework::client::{Client, ClientResult};
 
 mod data_base;
 
@@ -67,7 +68,7 @@ enum ClientError {
     param_names: Vec<String>,
 }*/
 
-impl ClientError::GettingParamsError {
+/*impl ClientError::GettingParamsError {
     fn get_description(&self) -> String {
         self.param_names.iter().fold(String::from("Getting params error: "),
                                      |acc, name| acc + name + ";")
@@ -86,9 +87,9 @@ impl std::fmt::Display for ClientError::GettingParamsError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.get_description())
     }
-}
+}*/
 
-fn handle_response(client: rustless::framework::client::Client, handler: Fn() -> Result<ClientResult, ClientError>) -> ClientResult {
+fn handle_response<'a>(client: Client, handler: Fn() -> Result<ClientResult<'a>, ClientError>) -> ClientResult<'a> {
     match handler {
         Ok(res) => res,
         Err(error) => client.error(error)
@@ -134,7 +135,7 @@ fn main() {
             cache_api.post("/tx_start", |endpoint| {
                 endpoint.handle(|client, params| {
                     let db_manager = client.app.get_data_base_manager();
-                    client.json(&JsonValue::U64(db_manager.tx_start()))
+                    client.json(&rustless::json::JsonValue::U64(db_manager.tx_start()))
                 })
             });
 
@@ -151,10 +152,10 @@ fn main() {
                                 let db_manager = client.app.get_data_base_manager();
                                 let tx_id = try!(params.find("tx_id")
                                         .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec!("tx_id"))));
+                                        .ok_or(ClientError::GettingParamsError(vec!["tx_id"])));
                                 let table_name = try!(params.find("table_name")
                                         .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec!("table_name"))));
+                                        .ok_or(ClientError::GettingParamsError(vec!["table_name"])));
                                 let res = db_manager.add_data(&String::from(table_name),
                                                             tx_id,
                                                             &key,
@@ -207,9 +208,7 @@ fn main() {
                             }
                         }
                         None => {
-                            client.error(GettingParamsError {
-                                param_names: vec![String::from("table_name"), String::from("key")],
-                            })
+                            client.error(ClientError::GettingParamsError(vec![String::from("table_name"), String::from("key")]))
                         }
 
                     }

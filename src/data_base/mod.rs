@@ -227,13 +227,13 @@ impl Table {
 		Ok(true)
 	}
 
-	pub fn tx_get(&self, tx_id: u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+	pub fn tx_get(&self, tx_id: &u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		try!(self.get_lock(tx_id, key_entity));
 		self.get(&key_entity)
 	}
 
-	pub fn tx_put(&self, tx_id: u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
+	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		try!(self.get_lock(tx_id, key_entity));
@@ -343,7 +343,7 @@ impl DataBaseManager {
     }
 
 	pub fn add_data(&self,
-			tx_id: u32,
+			tx_id: &u32,
 			table_name: &String, 
 			key: &rustless::json::JsonValue,
 			value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
@@ -354,7 +354,7 @@ impl DataBaseManager {
 	}
 
 	pub fn get_data(&self,
-			tx_id: u32,
+			tx_id: &u32,
 			table_name: &String,
 			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
@@ -365,8 +365,8 @@ impl DataBaseManager {
 		self.tx_manager.start()
 	}
 
-	pub fn tx_stop(&self, tx_id: u32) -> Result<(), PersistenceError> {
-		self.tx_manager.stop()
+	pub fn tx_stop(&self, tx_id: &u32) -> Result<(), PersistenceError> {
+		self.tx_manager.stop(tx_id)
 	}
 }
 
@@ -386,7 +386,7 @@ impl TransactionManager {
 		res
 	}
 	
-	fn get_tx(&self, tx_id: u32) -> Result<Arc<Box<Transaction>>, PersistenceError> {
+	fn get_tx(&self, tx_id: &u32) -> Result<Arc<Box<Transaction>>, PersistenceError> {
 		match self.transactions.find(&tx_id) {
 			Some(transaction) => Ok(transaction.get().clone()),
 			None => Err(PersistenceError::UndefinedTransaction)
@@ -400,7 +400,7 @@ impl TransactionManager {
 		id
 	}
 
-	fn stop(&self, id: u32) -> Result<(), PersistenceError> {
+	fn stop(&self, id: &u32) -> Result<(), PersistenceError> {
 		match self.transactions.remove(&id) {
 			Some(transaction) => {
 				transaction.locked_keys.clear();
