@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, Condvar};
 
 use concurrent_hashmap::*;
 
@@ -28,6 +28,7 @@ pub struct DataBaseManager {
     type_descriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
     table_descriptions: ConcHashMap<String, TableDescription>, //BTreeMap::<String, TableDescription>::new();
 	tables: ConcHashMap<String, Table>,
+	tx_manager: Arc<TransactionManager>
 }
 
 // Field of entity
@@ -40,12 +41,13 @@ struct Field {
 #[derive(Debug, Eq, Hash, Clone)]
 pub struct Entity {
 	fields: BTreeMap<u16, Field>,
-	lock: Mutex<Lock>
+	lock: Lock
 }
 
 struct Lock {
-	on: bool,
-	lock_type: LockType
+	lock_type: LockType,
+	tx_id: u32,
+	condition: Arc<(Mutex<bool>, Condvar)>
 }
 
 enum LockType {
@@ -64,7 +66,7 @@ pub struct Table {
 struct Transaction {
 	id: u32,
 	on: bool, // true - transaction is executed
-	locked_keys: ConcHashMap<Entity, MutexGuard<'static, Lock>> // keys of locked entities
+	locked_keys: HashSet<Entity> // keys of locked entities
 }
 
 // Transactions data driver
@@ -111,7 +113,7 @@ impl PartialEq for Entity {
 
 impl Lock {
 	fn new() -> Lock {
-		Lock { on: false, lock_type: LockType::Read }
+		Lock { lock_type: LockType::Read, tx_id: 0, condition: Arc::new((Mutex::new(false), Condvar::new())) }
 	}
 }
 
@@ -153,7 +155,7 @@ impl Table {
 							(field_id, Field { data: value }) 
 						}))
 					.collect();
-				fields.map(|fields| Entity { fields: fields })
+				fields.map(|fields| Entity { fields: fields, lock: Lock::new() })
 				//Ok( Entity { fields: fields } )
 			}
 		} else {
@@ -196,7 +198,7 @@ impl Table {
 	fn get(&self, key_entity: &Entity) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		match self.data.find(&key_entity) {
 			Some(data) => {
-				data.lock();
+				//data.get().lock();
 				Table::entity_to_json(data.get(), &self.description.value)
 				.map(|json_entity| Some(json_entity))
 				.map_err(|err| PersistenceError::IoEntity(err))
@@ -208,9 +210,19 @@ impl Table {
 	fn get_lock(&self, tx_id: u32, key_entity: Entity) -> Result<bool, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
-		if !key_entity.lock.on || !transaction.locked_keys.contains(key_entity) {
-			let lock_guard = key_entity.lock.lock();
-			transaction.locked_keys.inser(key_entity, lock_guard);
+		if !transaction.locked_keys.contains(&key_entity) {
+			let &(ref lock_var, ref condvar) = &*key_entity.lock.condition;
+			// TODO: rollback case
+			let key_locked = lock_var.lock().unwrap();
+			if *key_locked && key_entity.lock.tx_id != tx_id {
+				let mut locked = false;
+				while !locked {
+					locked = *condvar.wait(key_locked).unwrap();
+				}
+			}
+			*key_locked = true;
+			key_entity.lock.tx_id = tx_id;
+			transaction.locked_keys.insert(key_entity);
 		};
 		Ok(true)
 	}
@@ -225,7 +237,8 @@ impl Table {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		try!(self.get_lock(tx_id, key_entity));
-		self.data.upsert(key_entity, value_entity)
+		self.data.upsert(key_entity, value_entity, &|value| {});
+		Ok(())
 	}
 }
 
@@ -319,7 +332,9 @@ impl DataBaseManager {
     pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
 		if !self.table_descriptions.find(&table_description.name).is_some() {
         	let table_desc = try!(TableDescription::from_view(&table_description, &self.type_descriptions));
-			self.tables.insert(table_desc.name.clone(), Table { description: table_desc, data: ConcHashMap::<Entity, Entity>::new() });
+			self.tables.insert(
+				table_desc.name.clone(), 
+				Table { description: table_desc, data: ConcHashMap::<Entity, Entity>::new(), tx_manager: self.tx_manager.clone() });
 			//self.table_descriptions.insert(table_desc.name.clone(), table_desc);
 			Ok(table_description.name.clone())
 		} else {
@@ -328,26 +343,36 @@ impl DataBaseManager {
     }
 
 	pub fn add_data(&self,
+			tx_id: u32,
 			table_name: &String, 
 			key: &rustless::json::JsonValue,
 			value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		match self.tables.find(table_name) {
-			Some(table) => table.get().put(key, value),
+			Some(table) => table.get().tx_put(tx_id, key, value),
 			None => Err(PersistenceError::TableNotFound(table_name.clone()))
 		}
 	}
 
 	pub fn get_data(&self,
+			tx_id: u32,
 			table_name: &String,
 			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
-		table.get().get(key)
+		table.get().tx_get(tx_id, key)
+	}
+	
+	pub fn tx_start(&self) -> u32 {
+		self.tx_manager.start()
+	}
+
+	pub fn tx_stop(&self, tx_id: u32) -> Result<(), PersistenceError> {
+		self.tx_manager.stop()
 	}
 }
 
 impl TransactionManager {
 	fn new() -> TransactionManager {
-		TransactionManager { counter: Arc::new(Mutex::new(0)), transactions: ConcHashMap::<u32, Transaction>::new() }
+		TransactionManager { counter: Arc::new(Mutex::new(0)), transactions: ConcHashMap::<u32, Arc<Box<Transaction>>>::new() }
 	}
 
 	fn get_tx_id(&self) -> u32 {
@@ -362,15 +387,15 @@ impl TransactionManager {
 	}
 	
 	fn get_tx(&self, tx_id: u32) -> Result<Arc<Box<Transaction>>, PersistenceError> {
-		match self.transactions.find(tx_id) {
-			Some(transaction) => Ok(transaction.clone()),
+		match self.transactions.find(&tx_id) {
+			Some(transaction) => Ok(transaction.get().clone()),
 			None => Err(PersistenceError::UndefinedTransaction)
 		}
 	}
 
 	fn start(&self) -> u32 {
 		let id = self.get_tx_id();
-		let transaction = Arc::new(Box::new(Transaction { id: id, on: true, locked_keys: ConcHashMap::<Entity, MutexGuard<'static, Lock>>::new() }));
+		let transaction = Arc::new(Box::new(Transaction { id: id, on: true, locked_keys: HashSet::<Entity>::new() }));
 		self.transactions.insert(id, transaction);
 		id
 	}

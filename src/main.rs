@@ -57,19 +57,24 @@ pub struct TestStruct {
     data_vector: Vec<u8>,
 }
 
+// For show errors on client side
 #[derive(Debug)]
-pub struct GettingParamsError {
-    param_names: Vec<String>,
+enum ClientError {
+    GettingParamsError(Vec<String>)
 }
 
-impl GettingParamsError {
+/*pub struct GettingParamsError {
+    param_names: Vec<String>,
+}*/
+
+impl ClientError::GettingParamsError {
     fn get_description(&self) -> String {
         self.param_names.iter().fold(String::from("Getting params error: "),
                                      |acc, name| acc + name + ";")
     }
 }
 
-impl std::error::Error for GettingParamsError {
+impl std::error::Error for ClientError::GettingParamsError {
     fn description(&self) -> &str {
         // let desc = self.get_description().clone();
         // &desc.as_str()
@@ -77,12 +82,13 @@ impl std::error::Error for GettingParamsError {
     }
 }
 
-impl std::fmt::Display for GettingParamsError {
+impl std::fmt::Display for ClientError::GettingParamsError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.get_description())
     }
 }
 
+fn handle_response(Fn() -> Result<)
 fn get_key_and_value
     (params: &rustless::json::JsonValue)
      -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
@@ -119,15 +125,24 @@ fn main() {
                 })
             });
 
+            cache_api.post("/tx_start", |endpoint| {
+                endpoint.handle(|client, params| {
+                    let db_manager = client.app.get_data_base_manager();
+                    client.json(&JsonValue::U64(db_manager.tx_start()))
+                })
+            });
+
             cache_api.post("put/:table_name", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
+                    params.req_typed("tx_id", json_dsl::u64());
                     params.req("data", |_| {})
                 });
                 endpoint.handle(|client, params| {
                     match get_key_and_value(params) {
                         Ok((key, value)) => {
                             let db_manager = client.app.get_data_base_manager();
+                            let tx_id = params.find().map(|value| value.as_str());
                             let res = db_manager.add_data(&String::from(params.find("table_name")
                                                               .unwrap()
                                                               .as_str()
