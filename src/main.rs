@@ -88,7 +88,13 @@ impl std::fmt::Display for ClientError::GettingParamsError {
     }
 }
 
-fn handle_response(Fn() -> Result<)
+fn handle_response(client: rustless::framework::client::Client, handler: Fn() -> Result<ClientResult, ClientError>) -> ClientResult {
+    match handler {
+        Ok(res) => res,
+        Err(error) => client.error(error)
+    }
+}
+
 fn get_key_and_value
     (params: &rustless::json::JsonValue)
      -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
