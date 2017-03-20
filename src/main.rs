@@ -145,23 +145,28 @@ fn main() {
                     params.req("data", |_| {})
                 });
                 endpoint.handle(|client, params| {
-                    match get_key_and_value(params) {
-                        Ok((key, value)) => {
-                            let db_manager = client.app.get_data_base_manager();
-                            let tx_id = params.find().map(|value| value.as_str());
-                            let res = db_manager.add_data(&String::from(params.find("table_name")
-                                                              .unwrap()
-                                                              .as_str()
-                                                              .unwrap()),
-                                                          &key,
-                                                          &value);
-                            match res {
-                                Ok(_) => client.text("Done".to_string()),
-                                Err(err) => client.text(err.to_string()),
+                    handle_response(client, || {
+                        match get_key_and_value(params) {
+                            Ok((key, value)) => {
+                                let db_manager = client.app.get_data_base_manager();
+                                let tx_id = try!(params.find("tx_id")
+                                        .map(|value| value.as_str())
+                                        .ok_or(ClientError::GettingParamsError(vec!("tx_id"))));
+                                let table_name = try!(params.find("table_name")
+                                        .map(|value| value.as_str())
+                                        .ok_or(ClientError::GettingParamsError(vec!("table_name"))));
+                                let res = db_manager.add_data(&String::from(table_name),
+                                                            tx_id,
+                                                            &key,
+                                                            &value);
+                                match res {
+                                    Ok(_) => client.text("Done".to_string()),
+                                    Err(err) => client.text(err.to_string()),
+                                }
                             }
+                            Err(message) => client.text(message),
                         }
-                        Err(message) => client.text(message),
-                    }
+                    })
                 })
             });
 
