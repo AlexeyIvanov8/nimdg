@@ -207,21 +207,21 @@ impl Table {
 		}
 	}
 
-	fn get_lock(&self, tx_id: u32, key_entity: Entity) -> Result<bool, PersistenceError> {
+	fn get_lock(&self, tx_id: &u32, key_entity: Entity) -> Result<bool, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
 		if !transaction.locked_keys.contains(&key_entity) {
 			let &(ref lock_var, ref condvar) = &*key_entity.lock.condition;
 			// TODO: rollback case
 			let key_locked = lock_var.lock().unwrap();
-			if *key_locked && key_entity.lock.tx_id != tx_id {
+			if *key_locked && key_entity.lock.tx_id != *tx_id {
 				let mut locked = false;
 				while !locked {
 					locked = *condvar.wait(key_locked).unwrap();
 				}
 			}
 			*key_locked = true;
-			key_entity.lock.tx_id = tx_id;
+			key_entity.lock.tx_id = tx_id.clone();
 			transaction.locked_keys.insert(key_entity);
 		};
 		Ok(true)

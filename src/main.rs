@@ -89,8 +89,8 @@ impl std::fmt::Display for ClientError::GettingParamsError {
     }
 }*/
 
-fn handle_response<'a>(client: Client, handler: Fn() -> Result<ClientResult<'a>, ClientError>) -> ClientResult<'a> {
-    match handler {
+fn handle_response<'a>(client: Client, handler: Box<Fn() -> Result<ClientResult<'a>, ClientError>>) -> ClientResult<'a> {
+    match handler() {
         Ok(res) => res,
         Err(error) => client.error(error)
     }
@@ -135,7 +135,7 @@ fn main() {
             cache_api.post("/tx_start", |endpoint| {
                 endpoint.handle(|client, params| {
                     let db_manager = client.app.get_data_base_manager();
-                    client.json(&rustless::json::JsonValue::U64(db_manager.tx_start()))
+                    client.json(&rustless::json::JsonValue::U64(db_manager.tx_start() as u64))
                 })
             });
 
@@ -152,12 +152,13 @@ fn main() {
                                 let db_manager = client.app.get_data_base_manager();
                                 let tx_id = try!(params.find("tx_id")
                                         .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec!["tx_id"])));
+                                        .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")])));
                                 let table_name = try!(params.find("table_name")
                                         .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec!["table_name"])));
-                                let res = db_manager.add_data(&String::from(table_name),
-                                                            tx_id,
+                                        .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")])));
+                                let res = db_manager.add_data(
+                                                            &tx_id,
+                                                            &String::from(table_name),
                                                             &key,
                                                             &value);
                                 match res {
