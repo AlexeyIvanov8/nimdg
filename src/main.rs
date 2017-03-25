@@ -64,6 +64,27 @@ enum ClientError {
     GettingParamsError(Vec<String>)
 }
 
+impl ClientError {
+    fn get_description(&self) -> String {
+        match *self {
+            ClientError::GettingParamsError(param_names) => param_names.iter()
+                    .fold(String::from("Getting params error: "), |acc, name| acc + name + ";")
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn description(&self) -> &str {
+        self.get_description().as_ref()
+    }
+}
+
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get_description())
+    }
+}
+
 /*pub struct GettingParamsError {
     param_names: Vec<String>,
 }*/
@@ -89,10 +110,11 @@ impl std::fmt::Display for ClientError::GettingParamsError {
     }
 }*/
 
-fn handle_response<'a>(client: Client, handler: Box<Fn() -> Result<ClientResult<'a>, ClientError>>) -> ClientResult<'a> {
+fn handle_response<'a, F>(client: Client<'a>, handler: F) -> ClientResult<'a>
+        where F: Fn() -> Result<ClientResult<'a>, ClientError> {
     match handler() {
         Ok(res) => res,
-        Err(error) => client.error(error)
+        Err(error) => client.error(error) //rustless::ErrorResponse{ error: Box::new(error), response: None })
     }
 }
 
@@ -150,23 +172,29 @@ fn main() {
                         match get_key_and_value(params) {
                             Ok((key, value)) => {
                                 let db_manager = client.app.get_data_base_manager();
-                                let tx_id = try!(params.find("tx_id")
-                                        .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")])));
-                                let table_name = try!(params.find("table_name")
-                                        .map(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")])));
+                                let tx_id = try!(
+                                    params.find("tx_id")
+                                        .and_then(|value| value.as_u64().map(|v| v as u32))
+                                        .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")]))
+                                );
+
+                                let table_name = try!(
+                                    params.find("table_name")
+                                        .and_then(|value| value.as_str())
+                                        .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")]))
+                                );
+
                                 let res = db_manager.add_data(
                                                             &tx_id,
                                                             &String::from(table_name),
                                                             &key,
                                                             &value);
                                 match res {
-                                    Ok(_) => client.text("Done".to_string()),
-                                    Err(err) => client.text(err.to_string()),
+                                    Ok(_) => Ok(client.text("Done".to_string())),
+                                    Err(err) => Ok(client.text(err.to_string())),
                                 }
                             }
-                            Err(message) => client.text(message),
+                            Err(message) => Ok(client.text(message)),
                         }
                     })
                 })
