@@ -4,6 +4,7 @@ extern crate bincode;
 extern crate serde_json;
 
 use std;
+use std::hash::{Hash, Hasher};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
@@ -44,12 +45,14 @@ pub struct Entity {
 	lock: Lock
 }
 
+#[derive(Debug, Clone)]
 struct Lock {
 	lock_type: LockType,
 	tx_id: u32,
 	condition: Arc<(Mutex<bool>, Condvar)>
 }
 
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 enum LockType {
 	Read,
 	Write
@@ -117,6 +120,21 @@ impl Lock {
 	}
 }
 
+impl PartialEq for Lock {
+	fn eq(&self, other: &Lock) -> bool {
+		self.tx_id == other.tx_id && self.lock_type == other.lock_type
+	}
+}
+
+impl Eq for Lock {}
+
+impl Hash for Lock {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.tx_id.hash(state);
+        self.lock_type.hash(state);
+    }
+}
+
 // Table impl
 impl Table {
 	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
@@ -133,18 +151,6 @@ impl Table {
 				} else {
 					None
 				}
-
-				/*let type_desc = description.get_field(name);
-				let field_id = description.get_field_id(name);
-
-				type_desc.and(field_id)
-				let field_desc = type_desc.and_then(|type_desc| { 
-					field_id.map(|field_id| { (field_id, type_desc) })
-				});
-
-				field_desc.map(|(field_id, type_desc)| 
-					(name.clone(), (field_id, type_desc.clone(), value)) 
-				)*/
 			}).collect::<BTreeMap<
 					String, 
 					(&u16, Arc<Box<TypeDescription>>, &rustless::json::JsonValue)

@@ -207,40 +207,41 @@ fn main() {
                 });
 
                 endpoint.handle(|client, params| {
-                    let table_name = params.find("table_name")
-                        .and_then(|table_name| table_name.as_str());
-                    let key = params.find("key")
-                        .and_then(|key| key.as_str())
-                        .map(|key| rustless::json::JsonValue::from_str(key));
-                    match key.and_then(|key| table_name.map(|table_name| (table_name, key))) {
-                        Some((table_name, key)) => {
-                            match key {
-                                Ok(key) => {
-                                    let db_manager = client.app.get_data_base_manager();
-                                    let value =
-                                        db_manager.get_data(&String::from(table_name), &key);
-                                    match value {
-                                        Ok(value) => {
-                                            match value {
-                                                Some(value) => client.json(&value),
-                                                None => {
-                                                    client.text("Entity with key ".to_string() +
-                                                                key.to_string().as_str() +
-                                                                " not found")
-                                                }
+                    handle_response(client, || {
+                        let table_name = try!(params.find("table_name")
+                            .and_then(|table_name| table_name.as_str())
+                            .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")])));
+
+                        let key = try!(params.find("key")
+                            .and_then(|key| key.as_str())
+                            .map(|key| rustless::json::JsonValue::from_str(key))
+                            .ok_or(ClientError::GettingParamsError(vec![String::from("key")])));
+
+                        let tx_id = try!(params.find("tx_id")
+                            .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
+                            .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")])));
+
+                        match key {
+                            Ok(key) => {
+                                let db_manager = client.app.get_data_base_manager();
+                                let value = db_manager.get_data(&tx_id, &String::from(table_name), &key);
+                                match value {
+                                    Ok(value) => {
+                                        match value {
+                                            Some(value) => Ok(client.json(&value)),
+                                            None => {
+                                                Ok(client.text("Entity with key ".to_string() +
+                                                                 key.to_string().as_str() +
+                                                                " not found"))
                                             }
                                         }
-                                        Err(message) => client.text(message.to_string()),
                                     }
+                                    Err(message) => Ok(client.text(message.to_string())),
                                 }
-                                Err(message) => client.error(message),
                             }
+                            Err(message) => Ok(client.error(message)),
                         }
-                        None => {
-                            client.error(ClientError::GettingParamsError(vec![String::from("table_name"), String::from("key")]))
-                        }
-
-                    }
+                    })
                 })
             });
 
