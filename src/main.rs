@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use rustless::{Application, Api, Nesting, Versioning};
 use rustless::framework::client::{Client, ClientResult};
+use rustless::json::JsonValue;
 
 mod data_base;
 
@@ -111,9 +112,9 @@ impl std::fmt::Display for ClientError::GettingParamsError {
 }*/
 
 fn handle_response<'a, F>(client: Client<'a>, handler: F) -> ClientResult<'a>
-        where F: Fn() -> Result<ClientResult<'a>, ClientError> {
-    match handler() {
-        Ok(res) => res,
+        where F: Fn(&Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
+    match handler(&client) {
+        Ok(res) => client.json(&res),
         Err(error) => client.error(error) //rustless::ErrorResponse{ error: Box::new(error), response: None })
     }
 }
@@ -168,7 +169,7 @@ fn main() {
                     params.req("data", |_| {})
                 });
                 endpoint.handle(|client, params| {
-                    handle_response(client, || {
+                    handle_response(client, |client| {
                         match get_key_and_value(params) {
                             Ok((key, value)) => {
                                 let db_manager = client.app.get_data_base_manager();
@@ -190,11 +191,11 @@ fn main() {
                                                             &key,
                                                             &value);
                                 match res {
-                                    Ok(_) => Ok(client.text("Done".to_string())),
-                                    Err(err) => Ok(client.text(err.to_string())),
+                                    Ok(_) => Ok(JsonValue::String("Done".to_string())),
+                                    Err(err) => Ok(JsonValue::String(err.to_string())),
                                 }
                             }
-                            Err(message) => Ok(client.text(message)),
+                            Err(message) => Ok(JsonValue::String(message)),
                         }
                     })
                 })
@@ -207,19 +208,25 @@ fn main() {
                 });
 
                 endpoint.handle(|client, params| {
-                    handle_response(client, || {
-                        let table_name = try!(params.find("table_name")
-                            .and_then(|table_name| table_name.as_str())
-                            .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")])));
+                    handle_response(client, |client| {
+                        let table_name = try!(
+                            params.find("table_name")
+                                .and_then(|table_name| table_name.as_str())
+                                .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")]))
+                        );
 
-                        let key = try!(params.find("key")
-                            .and_then(|key| key.as_str())
-                            .map(|key| rustless::json::JsonValue::from_str(key))
-                            .ok_or(ClientError::GettingParamsError(vec![String::from("key")])));
+                        let key = try!(
+                            params.find("key")
+                                .and_then(|key| key.as_str())
+                                .map(|key| rustless::json::JsonValue::from_str(key))
+                                .ok_or(ClientError::GettingParamsError(vec![String::from("key")]))
+                        );
 
-                        let tx_id = try!(params.find("tx_id")
-                            .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
-                            .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")])));
+                        let tx_id = try!(
+                            params.find("tx_id")
+                                .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
+                                .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")]))
+                        );
 
                         match key {
                             Ok(key) => {
@@ -228,18 +235,18 @@ fn main() {
                                 match value {
                                     Ok(value) => {
                                         match value {
-                                            Some(value) => Ok(client.json(&value)),
+                                            Some(value) => Ok(value),
                                             None => {
-                                                Ok(client.text("Entity with key ".to_string() +
+                                                Ok(JsonValue::String("Entity with key ".to_string() +
                                                                  key.to_string().as_str() +
                                                                 " not found"))
                                             }
                                         }
                                     }
-                                    Err(message) => Ok(client.text(message.to_string())),
+                                    Err(message) => Ok(JsonValue::String(message.to_string())),
                                 }
                             }
-                            Err(message) => Ok(client.error(message)),
+                            Err(message) => Ok(JsonValue::String(message.to_string())),
                         }
                     })
                 })
