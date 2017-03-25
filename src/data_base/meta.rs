@@ -63,6 +63,18 @@ impl ToJson for EntityDescription {
 }
 
 impl EntityDescription {
+	pub fn get_field_id(&self, name: &String) -> Option<u16> {
+		self.reverse_ids_map.get(name)
+	}
+
+	pub fn get_filed_name(&self, id: &u16) -> Option<String> {
+		self.ids_map.get(id)
+	}
+
+	pub fn get_field(&self, name: &String) -> Option<Arc<Box<TypeDescription>>> {
+		self.fields.get(self.fields)
+	}
+
     fn from_view(
             view: &EntityDescriptionView, 
 		    type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<EntityDescription, String> {

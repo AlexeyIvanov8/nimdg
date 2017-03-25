@@ -124,8 +124,8 @@ impl Table {
 			let json_object = try!(json.as_object().ok_or(IoEntityError::Read("Json object not found".to_string())));
 			// 1. select types for json fields
 			let selected_values = json_object.iter().filter_map(|(name, value)| {
-				let type_desc = description.fields.get(name);
-				let field_id = description.reverse_ids_map.get(name);
+				let type_desc = description.get_field(name);
+				let field_id = description.get_field_id(name);
 				let field_desc = type_desc.and_then(|type_desc| { 
 					field_id.map(|field_id| { (field_id, type_desc) })
 				});
