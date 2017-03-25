@@ -126,11 +126,29 @@ impl Table {
 			let selected_values = json_object.iter().filter_map(|(name, value)| {
 				let type_desc = description.get_field(name);
 				let field_id = description.get_field_id(name);
+
+				if let (Some(type_desc), Some(field_id)) =
+						(type_desc, field_id) {
+					Some((name.clone(), (field_id, type_desc.clone(), value)))
+				} else {
+					None
+				}
+
+				/*let type_desc = description.get_field(name);
+				let field_id = description.get_field_id(name);
+
+				type_desc.and(field_id)
 				let field_desc = type_desc.and_then(|type_desc| { 
 					field_id.map(|field_id| { (field_id, type_desc) })
 				});
-				field_desc.map(|(field_id, type_desc)| (name.clone(), (field_id, type_desc.clone(), value)) )
-			}).collect::<BTreeMap<String, (&u16, Arc<Box<TypeDescription>>, &rustless::json::JsonValue)>>();
+
+				field_desc.map(|(field_id, type_desc)| 
+					(name.clone(), (field_id, type_desc.clone(), value)) 
+				)*/
+			}).collect::<BTreeMap<
+					String, 
+					(&u16, Arc<Box<TypeDescription>>, &rustless::json::JsonValue)
+				>>();
 			let selected_values_keys = selected_values.keys().map(|key| key.clone()).collect::<HashSet<String>>();
 				
 			// 2. check what all fields is typed and 

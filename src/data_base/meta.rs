@@ -63,16 +63,16 @@ impl ToJson for EntityDescription {
 }
 
 impl EntityDescription {
-	pub fn get_field_id(&self, name: &String) -> Option<u16> {
+	pub fn get_field_id(&self, name: &String) -> Option<&u16> {
 		self.reverse_ids_map.get(name)
 	}
 
-	pub fn get_filed_name(&self, id: &u16) -> Option<String> {
+	pub fn get_filed_name(&self, id: &u16) -> Option<&String> {
 		self.ids_map.get(id)
 	}
 
 	pub fn get_field(&self, name: &String) -> Option<Arc<Box<TypeDescription>>> {
-		self.fields.get(self.fields)
+		self.fields.get(name).map(|field| field.clone())
 	}
 
     fn from_view(
