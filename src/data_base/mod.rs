@@ -69,7 +69,7 @@ pub struct Table {
 struct Transaction {
 	id: u32,
 	on: bool, // true - transaction is executed
-	locked_keys: HashSet<Entity> // keys of locked entities
+	locked_keys: Box<HashSet<Entity>> // keys of locked entities
 }
 
 // Transactions data driver
@@ -237,7 +237,7 @@ impl Table {
 		if !transaction.locked_keys.contains(&key_entity) {
 			let &(ref lock_var, ref condvar) = &*key_entity.lock.condition;
 			// TODO: rollback case
-			let key_locked = lock_var.lock().unwrap();
+			let mut key_locked = lock_var.lock().unwrap();
 			if *key_locked && key_entity.lock.tx_id != *tx_id {
 				let mut locked = false;
 				while !locked {
@@ -245,8 +245,9 @@ impl Table {
 				}
 			}
 			*key_locked = true;
+			let mut key_entity = key_entity;
 			key_entity.lock.tx_id = tx_id.clone();
-			transaction.locked_keys.insert(key_entity);
+			transaction.add_key(key_entity);
 		};
 		Ok(true)
 	}
@@ -419,7 +420,7 @@ impl TransactionManager {
 
 	fn start(&self) -> u32 {
 		let id = self.get_tx_id();
-		let transaction = Arc::new(Box::new(Transaction { id: id, on: true, locked_keys: HashSet::<Entity>::new() }));
+		let transaction = Arc::new(Box::new(Transaction { id: id, on: true, locked_keys: Box::new(HashSet::<Entity>::new()) }));
 		self.transactions.insert(id, transaction);
 		id
 	}
@@ -432,5 +433,15 @@ impl TransactionManager {
 			},
 			None => Err(PersistenceError::UndefinedTransaction)
 		}
+	}
+}
+
+impl Transaction {
+	fn add_key(&self, key: Entity) -> bool {
+		self.locked_keys.as_mut().insert(key)
+	}
+
+	fn remove_key(&self, key: Entity) -> bool {
+		self.locked_keys.as_mut().remove(&key)
 	}
 }
