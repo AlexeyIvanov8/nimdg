@@ -60,15 +60,25 @@ pub struct TestStruct {
 }
 
 // For show errors on client side
-#[derive(Debug)]
-enum ClientError {
+#[derive(Debug, Clone)]
+enum ClientErrorType {
     GettingParamsError(Vec<String>)
 }
 
+#[derive(Debug)]
+struct ClientError {
+    error_type: ClientErrorType,
+    description: String
+}
+
 impl ClientError {
-    fn get_description(&self) -> String {
-        match *self {
-            ClientError::GettingParamsError(param_names) => param_names.iter()
+    fn new(error_type: ClientErrorType) -> ClientError {
+        ClientError{error_type: error_type.clone(), description: ClientError::get_description(&error_type)}
+    }
+
+    fn get_description(error_type: &ClientErrorType) -> String {
+        match *error_type {
+            ClientErrorType::GettingParamsError(ref param_names) => param_names.iter()
                     .fold(String::from("Getting params error: "), |acc, name| acc + name + ";")
         }
     }
@@ -76,13 +86,13 @@ impl ClientError {
 
 impl std::error::Error for ClientError {
     fn description(&self) -> &str {
-        self.get_description().as_ref()
+        self.description.as_str()
     }
 }
 
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get_description())
+        write!(f, "{}", self.description)
     }
 }
 
@@ -90,14 +100,14 @@ impl std::fmt::Display for ClientError {
     param_names: Vec<String>,
 }*/
 
-/*impl ClientError::GettingParamsError {
+/*impl ClientErrorType::GettingParamsError {
     fn get_description(&self) -> String {
         self.param_names.iter().fold(String::from("Getting params error: "),
                                      |acc, name| acc + name + ";")
     }
 }
 
-impl std::error::Error for ClientError::GettingParamsError {
+impl std::error::Error for ClientErrorType::GettingParamsError {
     fn description(&self) -> &str {
         // let desc = self.get_description().clone();
         // &desc.as_str()
@@ -105,7 +115,7 @@ impl std::error::Error for ClientError::GettingParamsError {
     }
 }
 
-impl std::fmt::Display for ClientError::GettingParamsError {
+impl std::fmt::Display for ClientErrorType::GettingParamsError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.get_description())
     }
@@ -176,13 +186,13 @@ fn main() {
                                 let tx_id = try!(
                                     params.find("tx_id")
                                         .and_then(|value| value.as_u64().map(|v| v as u32))
-                                        .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")]))
+                                        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
                                 );
 
                                 let table_name = try!(
                                     params.find("table_name")
                                         .and_then(|value| value.as_str())
-                                        .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")]))
+                                        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
                                 );
 
                                 let res = db_manager.add_data(
@@ -212,20 +222,20 @@ fn main() {
                         let table_name = try!(
                             params.find("table_name")
                                 .and_then(|table_name| table_name.as_str())
-                                .ok_or(ClientError::GettingParamsError(vec![String::from("table_name")]))
+                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
                         );
 
                         let key = try!(
                             params.find("key")
                                 .and_then(|key| key.as_str())
                                 .map(|key| rustless::json::JsonValue::from_str(key))
-                                .ok_or(ClientError::GettingParamsError(vec![String::from("key")]))
+                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("key")])))
                         );
 
                         let tx_id = try!(
                             params.find("tx_id")
                                 .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
-                                .ok_or(ClientError::GettingParamsError(vec![String::from("tx_id")]))
+                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
                         );
 
                         match key {
