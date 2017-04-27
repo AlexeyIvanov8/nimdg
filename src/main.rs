@@ -1,4 +1,10 @@
 
+#![feature(rustc_private)]
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+//extern crate log4rs;
+
 extern crate rustc_serialize;
 extern crate concurrent_hashmap;
 extern crate bincode;
@@ -140,8 +146,9 @@ fn get_key_and_value
 }
 
 fn main() {
-
-    println!("Hello, world!");
+    env_logger::init().unwrap();
+    //log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
+    info!("Hello, world!");
 
     let api = Api::build(|api| {
         api.version("v1", Versioning::Path);
@@ -180,6 +187,7 @@ fn main() {
                 });
                 endpoint.handle(|client, params| {
                     handle_response(client, |client| {
+                        info!("put entity to table");
                         match get_key_and_value(params) {
                             Ok((key, value)) => {
                                 let db_manager = client.app.get_data_base_manager();
@@ -214,11 +222,13 @@ fn main() {
             cache_api.get("get/:table_name", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
-                    params.req("key", |_| {})
+                    params.req("key", |_| {});
+                    params.req_typed("tx_id", json_dsl::i64())
                 });
 
                 endpoint.handle(|client, params| {
                     handle_response(client, |client| {
+                        info!("get entity from table {}", params);
                         let table_name = try!(
                             params.find("table_name")
                                 .and_then(|table_name| table_name.as_str())
@@ -264,7 +274,6 @@ fn main() {
 
             cache_api.namespace("meta", |meta_ns| {
                 meta_ns.post("table", |endpoint| {
-                    println!("Table update");
                     endpoint.desc("Update description");
                     endpoint.params(|params| {
                         params.req("data", |data| {
@@ -284,6 +293,7 @@ fn main() {
                     });
 
                     endpoint.handle(|mut client, _params| {
+                        info!("Table update");
                         let cache_desc = _params.find("data").unwrap();
                         let table_desc = read_table_description_view(cache_desc);
                         match client.app.get_data_base_manager().add_table(table_desc) {
@@ -307,6 +317,7 @@ fn main() {
                         match params.find("name")
                             .and_then(|name| name.as_str()) {
                             Some(name) => {
+                                info!("Table with name {}", name);
                                 let table_desc = client.app
                                     .get_data_base_manager()
                                     .get_table(&String::from(name));

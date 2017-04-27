@@ -10,6 +10,7 @@ iron = "0.4.0"
 valico = "1"
 hyper = "0.10.2"
 serde_json = "0.9"
+env_logger = "0.4.2"
 
 [dependencies.concurrent-hashmap]
 version = "0.2.1"

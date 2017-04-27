@@ -3,6 +3,10 @@ extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate serde_json;
 
+#![feature(rustc_private)]
+#[macro_use]
+extern crate log;
+
 use std;
 use std::hash::{Hash, Hasher};
 use std::collections::{BTreeMap, HashSet};
@@ -93,6 +97,7 @@ pub enum PersistenceError {
 	EntityNotFound(Entity),
 	Undefined(String),
 	UndefinedTransaction,
+	TransactionAlreadyStarted(u32),
 }
 
 impl Display for PersistenceError {
@@ -448,16 +453,30 @@ impl TransactionManager {
 	
 	fn get_tx(&self, tx_id: &u32) -> Result<Arc<Mutex<Transaction>>, PersistenceError> {
 		match self.transactions.find(&tx_id) {
-			Some(transaction) => Ok(transaction.get().clone()),
-			None => Err(PersistenceError::UndefinedTransaction)
+			Some(transaction) => {
+				debug!("Found tx with id = {}", tx_id);
+				Ok(transaction.get().clone())
+			},
+			None => {
+				debug!("Tx with id = {} not found", tx_id);
+				Err(PersistenceError::UndefinedTransaction)
+			}
 		}
 	}
 
-	fn start(&self) -> u32 {
+	fn start(&self) -> Result<u32, PersistenceError> {
 		let id = self.get_tx_id();
 		let transaction = Arc::new(Mutex::new(Transaction { id: id, on: true, locked_keys: Box::new(HashSet::<Entity>::new()) }));
-		self.transactions.insert(id, transaction);
-		id
+		match self.transactions.insert(id, transaction) {
+			Some(value) => {
+				error!("Tx with id = {} and value = {} already started", id, value);
+				Err(PersistenceError::TransactionAlreadyStarted(id))
+			},
+			None => {
+				debug!("Tx with id = {} started", id);
+				Ok(id)
+			}
+		}
 	}
 
 	fn stop(&self, id: &u32) -> Result<(), PersistenceError> {
@@ -465,6 +484,7 @@ impl TransactionManager {
 			Some(transaction) => {
 				let mut locked_transaction = transaction.lock().unwrap();
 				locked_transaction.locked_keys.clear();
+				debug!("Tx with id = {} stopped", id);
 				Ok(())
 			},
 			None => Err(PersistenceError::UndefinedTransaction)
