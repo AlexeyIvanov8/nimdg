@@ -175,7 +175,10 @@ fn main() {
             cache_api.post("/tx_start", |endpoint| {
                 endpoint.handle(|client, params| {
                     let db_manager = client.app.get_data_base_manager();
-                    client.json(&rustless::json::JsonValue::U64(db_manager.tx_start() as u64))
+                    match db_manager.tx_start() {
+                        Ok(tx_id) => client.json(&rustless::json::JsonValue::U64(tx_id as u64)),
+                        Err(error) => client.text(error.to_string())
+                    }
                 })
             });
 

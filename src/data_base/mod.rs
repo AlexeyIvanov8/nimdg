@@ -3,10 +3,6 @@ extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate serde_json;
 
-#![feature(rustc_private)]
-#[macro_use]
-extern crate log;
-
 use std;
 use std::hash::{Hash, Hasher};
 use std::collections::{BTreeMap, HashSet};
@@ -238,16 +234,20 @@ impl Table {
 	}
 
 	fn get_lock(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<bool>, PersistenceError> {
+		debug!("get_lock started");
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
+		debug!("Tx id = {} for locking found", tx_id);
 		// Try get lock on key
 		let mut locked_transaction = transaction.lock().unwrap();
 		if !locked_transaction.locked_keys.contains(key_entity) {
+			debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			match self.data.find_mut(key_entity) {
 				Some(mut accessor) => {
 					let ref mut value_entity: Arc<Mutex<Entity>> = *accessor.get();
 					//let mutex: Mutex<Entity> = value_entity.get_mut().unwrap();
 					let mut temp = value_entity.clone();
 					let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
+					debug!("Lock for key {} is taken; lock id on key = {}", Table::entity_to_json(key_entity, &self.description.key).unwrap(), mut_value_entity.lock.tx_id);
 					if mut_value_entity.lock.tx_id != *tx_id {
 						let ref mut lock_mut = mut_value_entity.lock;
 						let &(ref lock_var, ref condvar) = &*lock_mut.condition; //&*mut_value_entity.lock.condition;
@@ -263,19 +263,8 @@ impl Table {
 				},
 				None => Ok(None)
 			}
-			/*let &(ref lock_var, ref condvar) = &*key_entity.lock.condition;
-			// TODO: rollback case
-			let mut key_locked = lock_var.lock().unwrap();
-			if *key_locked && key_entity.lock.tx_id != *tx_id {
-				while *key_locked {
-					key_locked = condvar.wait(key_locked).unwrap();
-				}
-			}
-			*key_locked = true;
-			let mut key_entity = key_entity;
-			key_entity.lock.tx_id = tx_id.clone();
-			transaction.add_key(key_entity);*/
 		} else {
+			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			Ok(Some(true))
 		}
 	}
@@ -293,15 +282,17 @@ impl Table {
 	}
 
 	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
+		debug!("Tx put started");
 		let mut key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let mut value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		Table::set_lock(&value_entity);
 		value_entity.lock.tx_id = tx_id.clone();
 		let inserted_value = Arc::new(Mutex::new(value_entity));
-		match self.data.insert(key_entity.clone(), inserted_value.clone()) {
+		try!(self.get_lock(tx_id, &key_entity));
+		/*match self.data.insert(key_entity.clone(), inserted_value.clone()) {
 			Some(prev) => { try!(self.get_lock(tx_id, &key_entity)); },
 			None => {}
-		};
+		};*/
 		self.data.upsert(key_entity, inserted_value.clone(), &|value| {});
 		Ok(())
 	}
@@ -426,7 +417,7 @@ impl DataBaseManager {
 		table.get().tx_get(tx_id, key)
 	}
 	
-	pub fn tx_start(&self) -> u32 {
+	pub fn tx_start(&self) -> Result<u32, PersistenceError> {
 		self.tx_manager.start()
 	}
 
@@ -469,7 +460,7 @@ impl TransactionManager {
 		let transaction = Arc::new(Mutex::new(Transaction { id: id, on: true, locked_keys: Box::new(HashSet::<Entity>::new()) }));
 		match self.transactions.insert(id, transaction) {
 			Some(value) => {
-				error!("Tx with id = {} and value = {} already started", id, value);
+				error!("Tx with id = {} already started", id);
 				Err(PersistenceError::TransactionAlreadyStarted(id))
 			},
 			None => {
