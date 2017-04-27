@@ -172,15 +172,31 @@ fn main() {
                 })
             });
 
-            cache_api.post("/tx_start", |endpoint| {
-                endpoint.handle(|client, params| {
-                    let db_manager = client.app.get_data_base_manager();
-                    match db_manager.tx_start() {
-                        Ok(tx_id) => client.json(&rustless::json::JsonValue::U64(tx_id as u64)),
-                        Err(error) => client.text(error.to_string())
-                    }
+            cache_api.namespace("tx", |tx_ns| {
+                tx_ns.post("start", |endpoint| {
+                    endpoint.handle(|client, params| {
+                        let db_manager = client.app.get_data_base_manager();
+                        match db_manager.tx_start() {
+                            Ok(tx_id) => client.json(&rustless::json::JsonValue::U64(tx_id as u64)),
+                            Err(error) => client.text(error.to_string())
+                        }
+                    })
+                });
+
+                tx_ns.delete("stop/:tx_id", |endpoint| {
+                    endpoint.params(|params| {
+                        params.req_typed("tx_id", json_dsl::u64())
+                    });
+
+                    endpoint.handle(|client, params| {
+                        let db_manager = client.app.get_data_base_manager();
+                        match db_manager.tx_stop() {
+                            Ok(()) => client.text("done"),
+                            Err(error) => client.text(error.to_string())
+                        }
+                    })
                 })
-            });
+            };
 
             cache_api.post("put/:table_name", |endpoint| {
                 endpoint.params(|params| {
