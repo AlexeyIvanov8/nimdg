@@ -189,14 +189,22 @@ fn main() {
                     });
 
                     endpoint.handle(|client, params| {
-                        let db_manager = client.app.get_data_base_manager();
-                        match db_manager.tx_stop() {
-                            Ok(()) => client.text("done"),
-                            Err(error) => client.text(error.to_string())
-                        }
+                        handle_response(client, |client| {
+                            let tx_id = try!(
+                                        params.find("tx_id")
+                                            .and_then(|value| value.as_u64().map(|v| v as u32))
+                                            .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
+                                    );
+
+                            let db_manager = client.app.get_data_base_manager();
+                            match db_manager.tx_stop(&tx_id) {
+                                Ok(()) => Ok(JsonValue::String(String::from("done"))),
+                                Err(error) => Ok(JsonValue::String(error.to_string()))
+                            }
+                        })
                     })
                 })
-            };
+            });
 
             cache_api.post("put/:table_name", |endpoint| {
                 endpoint.params(|params| {
