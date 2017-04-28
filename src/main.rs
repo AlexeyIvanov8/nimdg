@@ -177,7 +177,10 @@ fn main() {
                     endpoint.handle(|client, params| {
                         let db_manager = client.app.get_data_base_manager();
                         match db_manager.tx_start() {
-                            Ok(tx_id) => client.json(&rustless::json::JsonValue::U64(tx_id as u64)),
+                            Ok(tx_id) => {
+                                debug!("Response start tx {}", tx_id);
+                                client.json(&rustless::json::JsonValue::U64(tx_id as u64))
+                            },
                             Err(error) => client.text(error.to_string())
                         }
                     })

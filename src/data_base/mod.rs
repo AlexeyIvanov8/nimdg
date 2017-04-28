@@ -233,7 +233,8 @@ impl Table {
 		}
 	}
 
-	fn get_lock(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<bool>, PersistenceError> {
+	/* Try get lock for key_entity. Return copy of locked key with set tx_id. */
+	fn get_lock(&self, tx_id: &u32, key_entity: &Entity) -> Result<Entity, PersistenceError> {
 		debug!("get_lock started");
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		debug!("Tx id = {} for locking found", tx_id);
@@ -247,7 +248,8 @@ impl Table {
 					//let mutex: Mutex<Entity> = value_entity.get_mut().unwrap();
 					let mut temp = value_entity.clone();
 					let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
-					debug!("Lock for key {} is taken; lock id on key = {}", Table::entity_to_json(key_entity, &self.description.key).unwrap(), mut_value_entity.lock.tx_id);
+					debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}", 
+						Table::entity_to_json(key_entity, &self.description.key).unwrap(), mut_value_entity.lock.tx_id, mut_value_entity.lock.tx_id);
 					if mut_value_entity.lock.tx_id != *tx_id {
 						let ref mut lock_mut = mut_value_entity.lock;
 						let &(ref lock_var, ref condvar) = &*lock_mut.condition; //&*mut_value_entity.lock.condition;
@@ -258,14 +260,20 @@ impl Table {
 						*locked = true;
 						lock_mut.tx_id = tx_id.clone();
 						locked_transaction.add_key(key_entity.clone());
+						debug!("Lock for key {} is set, tx updated", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 					}
-					Ok(Some(true))
+					Ok(mut_value_entity.clone())
 				},
-				None => Ok(None)
+				None => {
+					let mut new_key_entity = key_entity.clone();
+					new_key_entity.lock.tx_id = tx_id;
+					locked_transaction.add_key(new_key_entity.clone());
+					Ok(new_key_entity)
+				}
 			}
 		} else {
 			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			Ok(Some(true))
+			Ok(key_entity)
 		}
 	}
 
@@ -428,14 +436,14 @@ impl DataBaseManager {
 
 impl TransactionManager {
 	fn new() -> TransactionManager {
-		TransactionManager { counter: Arc::new(Mutex::new(0)), transactions: ConcHashMap::<u32, Arc<Mutex<Transaction>>>::new() }
+		TransactionManager { counter: Arc::new(Mutex::new(1)), transactions: ConcHashMap::<u32, Arc<Mutex<Transaction>>>::new() }
 	}
 
 	fn get_tx_id(&self) -> u32 {
 		let counter = self.counter.clone();
 		let mut counter_mut = counter.lock().unwrap();
 		if counter_mut.eq(&u32::max_value()) {
-				*counter_mut = 0;
+				*counter_mut = 1;
 		};
 		let res = counter_mut.clone();
 		*counter_mut = *counter_mut + 1;
