@@ -4,7 +4,7 @@ extern crate bincode;
 extern crate serde_json;
 
 use std;
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash, Hasher, SipHasher};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
@@ -34,13 +34,13 @@ pub struct DataBaseManager {
 }
 
 // Field of entity
-#[derive(Debug, Eq, Hash, Clone)]
+#[derive(Debug, Eq, Clone)]
 struct Field {
 	data: Vec<u8>,
 }
 
 // Entity, that can be stored as key or value in table
-#[derive(Debug, Eq, Hash, Clone)]
+#[derive(Debug, Eq, Clone)]
 pub struct Entity {
 	fields: BTreeMap<u16, Field>,
 	lock: Lock
@@ -135,6 +135,26 @@ impl Hash for Lock {
         self.tx_id.hash(state);
         self.lock_type.hash(state);
     }
+}
+
+impl Hash for Field {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+    }
+}
+
+impl Hash for Entity {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+        self.fields.hash(state);
+    }
+}
+
+fn my_hash<T>(obj: T) -> u64
+    where T: Hash
+{
+    let mut hasher = SipHasher::new();
+    obj.hash(&mut hasher);
+    hasher.finish()
 }
 
 // Table impl
@@ -240,6 +260,11 @@ impl Table {
 		debug!("Tx id = {} for locking found", tx_id);
 		// Try get lock on key
 		let mut locked_transaction = transaction.lock().unwrap();
+		for k in locked_transaction.locked_keys.iter() {
+			debug!("    tx[{}] locked key {}, k==key_entity = {}, k.hash = {}, key_entity.hash = {}", tx_id, Table::entity_to_json(&k, &self.description.key).unwrap(),
+				key_entity.eq(k), my_hash(k), my_hash(key_entity));
+		}
+		debug!("Contains test = {}", locked_transaction.locked_keys.contains(key_entity));
 		if !locked_transaction.locked_keys.contains(key_entity) {
 			debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			match self.data.find_mut(key_entity) {
@@ -265,15 +290,16 @@ impl Table {
 					Ok(mut_value_entity.clone())
 				},
 				None => {
+					debug!("Tx not contains key yet. Add key {}", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 					let mut new_key_entity = key_entity.clone();
-					new_key_entity.lock.tx_id = tx_id;
+					new_key_entity.lock.tx_id = tx_id.clone();
 					locked_transaction.add_key(new_key_entity.clone());
 					Ok(new_key_entity)
 				}
 			}
 		} else {
 			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			Ok(key_entity)
+			Ok(key_entity.clone())
 		}
 	}
 
@@ -295,13 +321,19 @@ impl Table {
 		let mut value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		Table::set_lock(&value_entity);
 		value_entity.lock.tx_id = tx_id.clone();
-		let inserted_value = Arc::new(Mutex::new(value_entity));
-		try!(self.get_lock(tx_id, &key_entity));
+		let new_key_entity = try!(self.get_lock(tx_id, &key_entity));
 		/*match self.data.insert(key_entity.clone(), inserted_value.clone()) {
 			Some(prev) => { try!(self.get_lock(tx_id, &key_entity)); },
 			None => {}
 		};*/
-		self.data.upsert(key_entity, inserted_value.clone(), &|value| {});
+		debug!("Upsert value = {} with key = {}", Table::entity_to_json(&value_entity, &self.description.value).unwrap(),
+			 Table::entity_to_json(&new_key_entity, &self.description.key).unwrap());
+		let inserted_value = Arc::new(Mutex::new(value_entity));
+		self.data.upsert(new_key_entity, inserted_value.clone(), &|value| value);
+		for (k, v) in self.data.iter() {
+			debug!("    Current data: {} -> {}", Table::entity_to_json(k, &self.description.key).unwrap(),
+				Table::entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
+		}
 		Ok(())
 	}
 }
