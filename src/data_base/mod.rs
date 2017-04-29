@@ -329,7 +329,7 @@ impl Table {
 		debug!("Upsert value = {} with key = {}", Table::entity_to_json(&value_entity, &self.description.value).unwrap(),
 			 Table::entity_to_json(&new_key_entity, &self.description.key).unwrap());
 		let inserted_value = Arc::new(Mutex::new(value_entity));
-		self.data.upsert(new_key_entity, inserted_value.clone(), &|value| value);
+		self.data.upsert(new_key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
 		for (k, v) in self.data.iter() {
 			debug!("    Current data: {} -> {}", Table::entity_to_json(k, &self.description.key).unwrap(),
 				Table::entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
