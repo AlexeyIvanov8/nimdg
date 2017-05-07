@@ -315,8 +315,8 @@ impl Table {
 		} else {
 			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			match self.data.find(key_entity) {
-				Some(mut accessor) => Ok((*accessor.get()).clone()),
-				None => PersistenceError::EntityNotFound(key_entity.clone())
+				Some(mut accessor) => Ok(accessor.get().lock().unwrap().clone()),
+				None => Err(PersistenceError::EntityNotFound(key_entity.clone()))
 			}
 		}
 	}
