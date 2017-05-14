@@ -291,6 +291,7 @@ impl Table {
 			let ref mut lock_mut = mut_value_entity.lock;
 			let &(ref lock_var, ref condvar) = &*lock_mut.condition;
 			let mut locked = lock_var.lock().unwrap();
+			debug!("Current locked = {}", *locked);
 			while *locked {
 				locked = condvar.wait(locked).unwrap();
 			}
@@ -299,6 +300,7 @@ impl Table {
 			locked_transaction.add_entity(key_entity.clone(), value_entity.clone());
 			debug!("Lock for key {} is set, tx updated", Table::entity_to_json(key_entity, key_desc).unwrap());
 		}
+		debug!("Value locked");
 		mut_value_entity.clone()
 	}
 
@@ -362,11 +364,17 @@ impl Table {
 		*lock_var.lock().unwrap() = true;
 	}
 
+	fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {
+		let &(ref lock_var, ref condvar) = &*value.lock().unwrap().lock.condition;
+		let locked = lock_var.lock().unwrap();
+		*locked
+	}
+
 	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		debug!("Tx put started");
 		let mut key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let mut value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
-		Table::set_lock(&value_entity);
+		//Table::set_lock(&value_entity);
 		let inserted_value = Arc::new(Mutex::new(value_entity));
 		//value_entity.lock.tx_id = tx_id.clone();
 		let new_value_entity = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
@@ -374,8 +382,9 @@ impl Table {
 			Some(prev) => { try!(self.get_lock(tx_id, &key_entity)); },
 			None => {}
 		};*/
-		debug!("Upsert value = {} with key = {}", Table::entity_to_json(&new_value_entity, &self.description.value).unwrap(),
-			 Table::entity_to_json(&key_entity, &self.description.key).unwrap());
+		
+		debug!("Upsert value = {} with key = {}, locked = {}", Table::entity_to_json(&new_value_entity, &self.description.value).unwrap(),
+			 Table::entity_to_json(&key_entity, &self.description.key).unwrap(), Table::get_lock_value(inserted_value.clone()));
 
 		self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
 		for (k, v) in self.data.iter() {
