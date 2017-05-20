@@ -1,5 +1,5 @@
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::boxed::Box;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -50,6 +50,30 @@ unsafe impl Sync for TypeDescription {}
 impl ToJson for TypeDescription {
 	fn to_json(&self) -> rustless::json::JsonValue {
 		rustless::json::to_value(self.name.clone())
+	}
+}
+
+impl EntityDescriptionView {
+	fn from_json(json: &BTreeMap<String, rustless::json::JsonValue>)
+                                -> EntityDescriptionView {
+		let fields_object = json.get("fields").unwrap().as_object().unwrap();
+		let fields =
+			fields_object.iter().map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap()))).collect();
+		EntityDescriptionView { fields: fields }
+	}
+}
+
+impl TableDescriptionView {
+	pub fn from_json(json: &rustless::json::JsonValue) -> TableDescriptionView {
+		let name = json.find("name").unwrap().as_str().unwrap();
+		println!("Found cache desc with name = {}", name);
+		let key = EntityDescriptionView::from_json(json.find("key").unwrap().as_object().unwrap());
+		let value = EntityDescriptionView::from_json(json.find("value").unwrap().as_object().unwrap());
+		TableDescriptionView {
+			name: String::from(name),
+			key: key,
+			value: value,
+		}
 	}
 }
 

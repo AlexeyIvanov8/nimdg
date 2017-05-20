@@ -4,14 +4,13 @@ extern crate bincode;
 extern crate serde_json;
 
 use std;
-use std::hash::{Hash, Hasher, SipHasher};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, Condvar, LockResult};
-use std::ops::Deref;
+use std::sync::{Mutex, MutexGuard, Condvar};
 
 use concurrent_hashmap::*;
 
@@ -152,14 +151,6 @@ impl Hash for Entity {
     }
 }
 
-fn my_hash<T>(obj: T) -> u64
-    where T: Hash
-{
-    let mut hasher = SipHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
-}
-
 // Table impl
 impl Table {
 	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
@@ -256,25 +247,14 @@ impl Table {
 		}
 	}
 
-	// TODO: delete, lock only via value
-	/*fn unlock_key(key_entity: &Entity) {
-		let ref mut mut_key_entity = key_entity.lock;
-		let &(ref lock_var, ref condvar) = &*mut_key_entity.condition; //&*mut_value_entity.lock.condition;
-		let mut locked = lock_var.lock().unwrap();
-		*locked = false;
-		mut_key_entity.tx_id = DEFAULT_TX_ID;
-	}*/
-
-	fn unlock_value(tx_id: u32, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Result<(), PersistenceError> {
+	fn unlock_value(tx_id: u32, value_entity: Arc<Mutex<Entity>>) -> Result<(), PersistenceError> {
 		let mut mut_value_entity: MutexGuard<Entity> = value_entity.lock().unwrap();
 		debug!("Unlock key for tx {}", tx_id);
 		if mut_value_entity.lock.tx_id != tx_id {
 			Err(PersistenceError::WrongTransaction(mut_value_entity.lock.tx_id.clone(), tx_id.clone()))
 		} else {
-			//Table::unlock_key(key_entity);
-
 			let ref mut mut_lock: Lock = mut_value_entity.lock;
-			let &(ref lock_var, ref condvar) = &*mut_lock.condition;
+			let &(ref lock_var, _) = &*mut_lock.condition;
 			let mut locked = lock_var.lock().unwrap();
 			*locked = false;
 			mut_lock.tx_id = DEFAULT_TX_ID;
@@ -283,7 +263,7 @@ impl Table {
 	}
 
 	fn lock_value(tx_id: &u32, key_desc: &EntityDescription, locked_transaction: &Transaction, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Entity {
-		let mut temp = value_entity.clone();
+		let temp = value_entity.clone();
 		let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
 		debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}", 
 				Table::entity_to_json(key_entity, key_desc).unwrap(), mut_value_entity.lock.tx_id, mut_value_entity.lock.tx_id);
@@ -311,7 +291,7 @@ impl Table {
 			debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			match self.data.find_mut(key_entity) {
 				Some(mut accessor) => {
-					let value_entity: Entity = Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
+					Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
 					Ok(key_entity.clone())
 				},
 				None => Err(PersistenceError::EntityNotFound(key_entity.clone()))
@@ -339,14 +319,13 @@ impl Table {
 					let mut new_key_entity = key_entity.clone();
 					new_key_entity.lock.tx_id = tx_id.clone();
 					let res = Table::lock_value(tx_id, &self.description.key, &locked_transaction, &new_key_entity, value_entity);
-					//locked_transaction.add_key(new_key_entity.clone(), );
 					Ok(res)
 				}
 			}
 		} else {
 			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 			match self.data.find(key_entity) {
-				Some(mut accessor) => Ok(accessor.get().lock().unwrap().clone()),
+				Some(accessor) => Ok(accessor.get().lock().unwrap().clone()),
 				None => Err(PersistenceError::EntityNotFound(key_entity.clone()))
 			}
 		}
@@ -358,31 +337,19 @@ impl Table {
 		self.get(&key_entity)
 	}
 
-	fn set_lock(entity: &Entity) {
-		//let entity = entity_mutext.get_mut();
-		let &(ref lock_var, ref condvar) = &*entity.lock.condition;
-		*lock_var.lock().unwrap() = true;
-	}
-
 	fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {
-		let &(ref lock_var, ref condvar) = &*value.lock().unwrap().lock.condition;
+		let &(ref lock_var, _) = &*value.lock().unwrap().lock.condition;
 		let locked = lock_var.lock().unwrap();
 		*locked
 	}
 
 	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		debug!("Tx put started");
-		let mut key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-		let mut value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
-		//Table::set_lock(&value_entity);
+		let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		let inserted_value = Arc::new(Mutex::new(value_entity));
-		//value_entity.lock.tx_id = tx_id.clone();
 		let new_value_entity = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
-		/*match self.data.insert(key_entity.clone(), inserted_value.clone()) {
-			Some(prev) => { try!(self.get_lock(tx_id, &key_entity)); },
-			None => {}
-		};*/
-		
+
 		debug!("Upsert value = {} with key = {}, locked = {}", Table::entity_to_json(&new_value_entity, &self.description.value).unwrap(),
 			 Table::entity_to_json(&key_entity, &self.description.key).unwrap(), Table::get_lock_value(inserted_value.clone()));
 
@@ -560,7 +527,7 @@ impl TransactionManager {
 			locked_keys: Arc::new(ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new()) 
 		}));
 		match self.transactions.insert(id, transaction) {
-			Some(value) => {
+			Some(_) => {
 				error!("Tx with id = {} already started", id);
 				Err(PersistenceError::TransactionAlreadyStarted(id))
 			},
@@ -572,11 +539,13 @@ impl TransactionManager {
 	}
 
 	fn stop(&self, id: &u32) -> Result<(), PersistenceError> {
+		debug!("Begin stop tx {}", id);
 		match self.transactions.remove(&id) {
 			Some(transaction) => {
-				let mut locked_transaction = transaction.lock().unwrap();
+				let locked_transaction = transaction.lock().unwrap();
+				debug!("Lock tx for stop {}", locked_transaction.id);
 				for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
-					Table::unlock_value(locked_transaction.id.clone(), locked_key, locked_value.clone());
+					try!(Table::unlock_value(locked_transaction.id.clone(), locked_value.clone()));
 				};
 				locked_transaction.locked_keys.clear();
 				debug!("Tx with id = {} stopped", id);

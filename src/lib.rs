@@ -1,4 +1,6 @@
 
+
+#![crate_name="nimdg"]
 #![feature(rustc_private)]
 #[macro_use]
 extern crate log;
@@ -26,13 +28,13 @@ use rustless::{Application, Api, Nesting, Versioning};
 use rustless::framework::client::{Client, ClientResult};
 use rustless::json::JsonValue;
 
-mod data_base;
+pub mod data_base;
 
 use self::data_base::app_extension::DataBaseExtension;
 use self::data_base::meta::{EntityDescriptionView, TableDescriptionView};
 
 // reading views from rustless json
-fn read_entity_description_view(json: &BTreeMap<String, rustless::json::JsonValue>)
+/*fn read_entity_description_view(json: &BTreeMap<String, rustless::json::JsonValue>)
                                 -> EntityDescriptionView {
     let fields_object = json.get("fields").unwrap().as_object().unwrap();
     let fields =
@@ -51,7 +53,7 @@ fn read_table_description_view(json: &rustless::json::JsonValue) -> TableDescrip
         key: key,
         value: value,
     }
-}
+}*/
 
 fn run_data_base_manager(app: &mut rustless::Application) {
     let data_base_manager = data_base::DataBaseManager::new();
@@ -102,31 +104,6 @@ impl std::fmt::Display for ClientError {
     }
 }
 
-/*pub struct GettingParamsError {
-    param_names: Vec<String>,
-}*/
-
-/*impl ClientErrorType::GettingParamsError {
-    fn get_description(&self) -> String {
-        self.param_names.iter().fold(String::from("Getting params error: "),
-                                     |acc, name| acc + name + ";")
-    }
-}
-
-impl std::error::Error for ClientErrorType::GettingParamsError {
-    fn description(&self) -> &str {
-        // let desc = self.get_description().clone();
-        // &desc.as_str()
-        return "";
-    }
-}
-
-impl std::fmt::Display for ClientErrorType::GettingParamsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get_description())
-    }
-}*/
-
 fn handle_response<'a, F>(client: Client<'a>, handler: F) -> ClientResult<'a>
         where F: Fn(&Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
     match handler(&client) {
@@ -135,8 +112,7 @@ fn handle_response<'a, F>(client: Client<'a>, handler: F) -> ClientResult<'a>
     }
 }
 
-fn get_key_and_value
-    (params: &rustless::json::JsonValue)
+fn get_key_and_value(params: &rustless::json::JsonValue)
      -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
     let data =
         try!(params.find("data").and_then(|data| data.as_object()).ok_or("Param data not found"));
@@ -145,7 +121,7 @@ fn get_key_and_value
     Ok((&key, &value))
 }
 
-fn main() {
+pub fn mount_api() {
     env_logger::init().unwrap();
     //log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
     info!("Hello, world!");
@@ -174,7 +150,7 @@ fn main() {
 
             cache_api.namespace("tx", |tx_ns| {
                 tx_ns.post("start", |endpoint| {
-                    endpoint.handle(|client, params| {
+                    endpoint.handle(|client, _| {
                         let db_manager = client.app.get_data_base_manager();
                         match db_manager.tx_start() {
                             Ok(tx_id) => {
@@ -325,7 +301,7 @@ fn main() {
                     endpoint.handle(|mut client, _params| {
                         info!("Table update");
                         let cache_desc = _params.find("data").unwrap();
-                        let table_desc = read_table_description_view(cache_desc);
+                        let table_desc = TableDescriptionView::from_json(cache_desc);
                         match client.app.get_data_base_manager().add_table(table_desc) {
                             Ok(name) => {
                                 client.set_status(rustless::server::status::StatusCode::Ok);
@@ -391,16 +367,6 @@ fn main() {
                     });
 
     iron::Iron::new(app).http("localhost:4300").unwrap();
-    // Iron::new(|request: &mut Request| {
-    // Ok(match request.method {
-    // method::Get => Response::with((status::NotImplemented, "Method get not supported yet")),
-    // method::Put => {
-    // let mut buffer = String::new();
-    // request.body.read_to_string(&mut buffer);
-    // println!("Getting string = {}", buffer);
-    // Response::with((status::Ok, "Getting success"))
-    // },
-    // _ => Response::with((status::NotImplemented, "This method not implemented yet")),
-    // })
-    // }).http("localhost:4300").unwrap();
+    
+    
 }
