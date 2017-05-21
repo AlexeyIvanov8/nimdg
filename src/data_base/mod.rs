@@ -98,6 +98,12 @@ pub enum PersistenceError {
 	WrongTransaction(u32, u32) // real tx_id, expected tx_id
 }
 
+impl Display for IoEntityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 impl Display for PersistenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         Debug::fmt(self, f)

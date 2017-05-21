@@ -19,6 +19,8 @@ extern crate rustless;
 extern crate serde_json;
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::fmt::Display;
 
 use valico::json_dsl;
 use rustless::batteries::swagger;
@@ -70,7 +72,8 @@ pub struct TestStruct {
 // For show errors on client side
 #[derive(Debug, Clone)]
 enum ClientErrorType {
-    GettingParamsError(Vec<String>)
+    GettingParamsError(Vec<String>),
+    CommonError(String)
 }
 
 #[derive(Debug)]
@@ -84,10 +87,16 @@ impl ClientError {
         ClientError{error_type: error_type.clone(), description: ClientError::get_description(&error_type)}
     }
 
+    fn from_display(display: &Display) -> ClientError {
+        let description = format!("{}", display);
+        ClientError { error_type: ClientErrorType::CommonError(description.clone()), description: description.clone() }
+    }
+
     fn get_description(error_type: &ClientErrorType) -> String {
         match *error_type {
             ClientErrorType::GettingParamsError(ref param_names) => param_names.iter()
-                    .fold(String::from("Getting params error: "), |acc, name| acc + name + ";")
+                    .fold(String::from("Getting params error: "), |acc, name| acc + name + ";"),
+            ClientErrorType::CommonError(ref message) => message.clone()
         }
     }
 }
@@ -298,21 +307,25 @@ pub fn mount_api() {
                         })
                     });
 
-                    endpoint.handle(|mut client, _params| {
-                        info!("Table update");
-                        let cache_desc = _params.find("data").unwrap();
-                        let table_desc = TableDescriptionView::from_json(cache_desc);
-                        match client.app.get_data_base_manager().add_table(table_desc) {
-                            Ok(name) => {
-                                client.set_status(rustless::server::status::StatusCode::Ok);
-                                client.text("Table with name ".to_string() + name.as_str() +
-                                            " succefully added")
+                    endpoint.handle(|mut client, params| {
+                        handle_response(client, |client| {
+                            info!("Table update");
+                            let cache_desc = try!(params.find("data")
+                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("data param not found")]))));
+                            let table_desc = try!(TableDescriptionView::from_json(cache_desc)
+                                .map_err(|error| ClientError::from_display(&error)));
+                            match client.app.get_data_base_manager().add_table(table_desc) {
+                                Ok(name) => {
+                                    //client.set_status(rustless::server::status::StatusCode::Ok);
+                                    Ok(JsonValue::String("Table with name ".to_string() + name.as_str() +
+                                                " succefully added"))
+                                }
+                                Err(message) => {
+                                    //client.set_status(rustless::server::status::StatusCode::BadRequest);
+                                    Ok(JsonValue::String(message))
+                                }
                             }
-                            Err(message) => {
-                                client.set_status(rustless::server::status::StatusCode::BadRequest);
-                                client.text(message)
-                            }
-                        }
+                        })
                     })
                 });
 

@@ -19,24 +19,23 @@ fn put_test() {
     env_logger::init().unwrap();
     let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
     let table_desc = rustless::json::JsonValue::from_str("{
-        \"data\": {
-            \"name\": \"Client\", 
-            \"key\": {
-                \"fields\": {
-                    \"id\": \"u64\"
-                } 
-            },
-            \"value\": {
-                \"fields\": {
-                    \"full_name\": \"String\",
-                    \"age\": \"u64\"
-                }
-            }
-        } 
+        \"name\": \"Client\", 
+        \"key\": {
+            \"fields\": {
+                \"id\": \"u64\"
+            } 
+        },
+        \"value\": {
+            \"fields\": {
+                \"full_name\": \"String\",
+                \"age\": \"u64\"
+             }
+        }
     }");
     let table_desc_json = table_desc.unwrap();
     info!("Table desc json = {}", table_desc_json);
-    let table_desc_view = TableDescriptionView::from_json(&table_desc_json);
+    let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
+    let table_desc_view = table_desc_view_res.unwrap();
     info!("Table desc view = {:?}", table_desc_view);
     data_base_manager.add_table(table_desc_view);
 }
