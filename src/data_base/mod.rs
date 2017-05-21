@@ -390,7 +390,8 @@ impl DataBaseManager {
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::U64(value) =>
-						encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+						encode(&value.clone(), bincode::SizeLimit::Infinite)
+							.map_err(|err| IoEntityError::Read(err.to_string())),
                     _ => Err(IoEntityError::Read(String::from("Expected type u64")))
                 }
             }),

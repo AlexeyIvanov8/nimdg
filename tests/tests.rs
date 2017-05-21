@@ -1,4 +1,9 @@
 
+#![feature(rustc_private)]
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+
 extern crate nimdg;
 extern crate rustless;
 
@@ -11,6 +16,7 @@ mod data_base_test;
 
 #[test]
 fn put_test() {
+    env_logger::init().unwrap();
     let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
     let table_desc = rustless::json::JsonValue::from_str("{
         \"data\": {
@@ -29,6 +35,8 @@ fn put_test() {
         } 
     }");
     let table_desc_json = table_desc.unwrap();
-    debug!("Tdj = {}", table_desc_json);
-    data_base_manager.add_table(TableDescriptionView::from_json(&table_desc_json));
+    info!("Table desc json = {}", table_desc_json);
+    let table_desc_view = TableDescriptionView::from_json(&table_desc_json);
+    info!("Table desc view = {:?}", table_desc_view);
+    data_base_manager.add_table(table_desc_view);
 }

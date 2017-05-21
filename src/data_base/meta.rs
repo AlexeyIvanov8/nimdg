@@ -33,10 +33,12 @@ pub struct TableDescription {
 }
 
 // For getting from frontend
+#[derive(Debug)]
 pub struct EntityDescriptionView {
 	pub fields: BTreeMap<String, String>,
 }
 
+#[derive(Debug)]
 pub struct TableDescriptionView {
 	pub name: String,
 	pub key: EntityDescriptionView,
@@ -55,25 +57,44 @@ impl ToJson for TypeDescription {
 
 impl EntityDescriptionView {
 	fn from_json(json: &BTreeMap<String, rustless::json::JsonValue>)
-                                -> EntityDescriptionView {
-		let fields_object = json.get("fields").unwrap().as_object().unwrap();
+                                -> Result<EntityDescriptionView, IoEntityError> {
+		match json.get("fields") {
+			Some(value) =>
+				match value.as_object() {
+					Some(fields_object) => {
+						let fields_result: Result<BTreeMap<String, String>, IoEntityError> = fields_object.iter()
+							.map(|(k, v)| 
+								match v.as_str() {
+									Some(string_value) => Ok((k.clone(), String::from(string_value))),
+									None => Err(IoEntityError::Read(format!("Value {} is not a string", v)))
+								})
+							.collect();
+						let fields = try!(fields_result);
+						Ok(EntityDescriptionView { fields: fields })
+					},
+					None => Err(IoEntityError::Read(String::from("Property fields is not object")))
+				},
+			None => Err(IoEntityError::Read(String::from("Property fields not found")))
+		}
+		
+		/*let fields_object = json.get("fields").unwrap().as_object().unwrap();
 		let fields =
 			fields_object.iter().map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap()))).collect();
-		EntityDescriptionView { fields: fields }
+		EntityDescriptionView { fields: fields }*/
 	}
 }
 
 impl TableDescriptionView {
-	pub fn from_json(json: &rustless::json::JsonValue) -> TableDescriptionView {
-		let name = json.find("name").unwrap().as_str().unwrap();
-		println!("Found cache desc with name = {}", name);
-		let key = EntityDescriptionView::from_json(json.find("key").unwrap().as_object().unwrap());
-		let value = EntityDescriptionView::from_json(json.find("value").unwrap().as_object().unwrap());
-		TableDescriptionView {
+	pub fn from_json(json: &rustless::json::JsonValue) -> Result<TableDescriptionView, IoEntityError> {
+		let name = try!(json.find("name").and_then(|name| name.as_str()).ok_or(IoEntityError::Read(String::from("Table name not found"))));
+		println!("Reading table with name = {}", name);
+		let key = try!(EntityDescriptionView::from_json(json.find("key").unwrap().as_object().unwrap()));
+		let value = try!(EntityDescriptionView::from_json(json.find("value").unwrap().as_object().unwrap()));
+		Ok(TableDescriptionView {
 			name: String::from(name),
 			key: key,
 			value: value,
-		}
+		})
 	}
 }
 
