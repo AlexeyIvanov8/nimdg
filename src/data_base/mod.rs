@@ -67,11 +67,21 @@ pub struct Table {
 	tx_manager: Arc<TransactionManager>
 }
 
+struct LockedEntity {
+	reference: Arc<Mutex<Entity>>, // reference to entity in table
+	value: Entity // actual value in tx
+}
+
+struct LockedKey {
+	table_name: String,
+	key: Entity
+}
+
 // Struct for store data of transaction
 struct Transaction {
 	id: u32,
 	on: bool, // true - transaction is executed
-	locked_keys: Arc<ConcHashMap<Entity, Arc<Mutex<Entity>>>> // keys and refs to values of locked entities
+	locked_keys: Arc<ConcHashMap<LockedKey, LockedEntity>> // keys and refs to values of locked entities
 }
 
 // Transactions data driver
