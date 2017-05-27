@@ -19,3 +19,7 @@ loggers:
     appenders:
       - requests
     additive: false
+  nimdg:
+    level: debug
+  tests:
+    level: debug

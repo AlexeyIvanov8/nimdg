@@ -11,7 +11,7 @@ valico = "1"
 hyper = "0.10.2"
 serde_json = "0.9"
 log = "*"
-env_logger = "*"
+log4rs = "0.7.0"
 
 [dependencies.concurrent-hashmap]
 version = "0.2.1"

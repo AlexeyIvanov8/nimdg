@@ -290,7 +290,7 @@ impl Table {
 		mut_value_entity.clone()
 	}
 
-	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity) -> Result<Entity, PersistenceError> {
+	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		let locked_transaction = transaction.lock().unwrap();
 		if !locked_transaction.locked_keys.find(key_entity).is_some() {
@@ -298,13 +298,13 @@ impl Table {
 			match self.data.find_mut(key_entity) {
 				Some(mut accessor) => {
 					Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
-					Ok(key_entity.clone())
+					Ok(Some(key_entity.clone()))
 				},
-				None => Err(PersistenceError::EntityNotFound(key_entity.clone()))
+				None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
 			}
 		} else {
 			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			Ok(key_entity.clone())
+			Ok(Some(key_entity.clone()))
 		}
 	}
 
@@ -339,8 +339,13 @@ impl Table {
 
 	pub fn tx_get(&self, tx_id: &u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-		try!(self.get_lock_for_get(tx_id, &key_entity));
-		self.get(&key_entity)
+		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, &key_entity));
+		match locked_value {
+			Some(value) => Table::entity_to_json(&value, &self.description.value)
+					.map(|r| Some(r))
+					.map_err(|err| PersistenceError::IoEntity(err)),
+			None => self.get(&key_entity)
+		}
 	}
 
 	fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {

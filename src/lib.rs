@@ -4,8 +4,8 @@
 #![feature(rustc_private)]
 #[macro_use]
 extern crate log;
-extern crate env_logger;
-//extern crate log4rs;
+//extern crate env_logger;
+extern crate log4rs;
 
 extern crate rustc_serialize;
 extern crate concurrent_hashmap;
@@ -131,8 +131,8 @@ fn get_key_and_value(params: &rustless::json::JsonValue)
 }
 
 pub fn mount_api() {
-    env_logger::init().unwrap();
-    //log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
+    //env_logger::init().unwrap();
+    log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
     info!("Hello, world!");
 
     let api = Api::build(|api| {
