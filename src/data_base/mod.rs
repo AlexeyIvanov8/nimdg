@@ -290,22 +290,31 @@ impl Table {
 		mut_value_entity.clone()
 	}
 
+	fn get_copy_of_locked_value(locked_value: Arc<Mutex<Entity>>) -> Entity {
+		let locked_value_unwrap = locked_value.lock().unwrap();
+		locked_value_unwrap.clone()
+	}
+
 	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		let locked_transaction = transaction.lock().unwrap();
-		if !locked_transaction.locked_keys.find(key_entity).is_some() {
-			debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			match self.data.find_mut(key_entity) {
-				Some(mut accessor) => {
-					Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
-					Ok(Some(key_entity.clone()))
-				},
-				None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
+		let value_accessor = locked_transaction.locked_keys.find(key_entity);
+		match value_accessor {
+			Some(locked_value) => {
+				debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				Ok(Some(Table::get_copy_of_locked_value(locked_value.get().clone())))
+			},
+			None => {
+				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				match self.data.find_mut(key_entity) {
+					Some(mut accessor) => {
+						let locked_value = Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
+						Ok(Some(locked_value.clone()))
+					},
+					None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
+				}
 			}
-		} else {
-			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			Ok(Some(key_entity.clone()))
-		}
+		} 
 	}
 
 	fn get_lock_for_put(&self, tx_id: &u32, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Result<Entity, PersistenceError> {
@@ -341,10 +350,19 @@ impl Table {
 		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, &key_entity));
 		match locked_value {
-			Some(value) => Table::entity_to_json(&value, &self.description.value)
+			Some(value) => {
+				debug!("In current tx found value = {} by key = {}", 
+					Table::entity_to_json(&value, &self.description.value).unwrap(),
+					Table::entity_to_json(&key_entity, &self.description.key).unwrap());
+				Table::entity_to_json(&value, &self.description.value)
 					.map(|r| Some(r))
-					.map_err(|err| PersistenceError::IoEntity(err)),
-			None => self.get(&key_entity)
+					.map_err(|err| PersistenceError::IoEntity(err))
+			},
+			None => {
+				debug!("In current tx not found value for key = {}", 
+					Table::entity_to_json(&key_entity, &self.description.key).unwrap());
+				self.get(&key_entity)
+			}
 		}
 	}
 
