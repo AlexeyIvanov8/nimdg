@@ -21,10 +21,10 @@ use rustless::json::ToJson;
 
 pub mod app_extension;
 pub mod meta;
+pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
-
-const DEFAULT_TX_ID: u32 = 0;
+use data_base::transaction::{TransactionManager, Lock, LockedValue};
 
 // Top struct for interaction with tables
 pub struct DataBaseManager {
@@ -47,47 +47,11 @@ pub struct Entity {
 	lock: Lock
 }
 
-#[derive(Debug, Clone)]
-struct Lock {
-	lock_type: LockType,
-	tx_id: u32,
-	condition: Arc<(Mutex<bool>, Condvar)>
-}
-
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
-enum LockType {
-	Read,
-	Write
-}
-
 // Persistence for concrete entity structure
 pub struct Table {
 	description: TableDescription,
 	data: ConcHashMap<Entity, Arc<Mutex<Entity>>>,
 	tx_manager: Arc<TransactionManager>
-}
-
-struct LockedEntity {
-	reference: Arc<Mutex<Entity>>, // reference to entity in table
-	value: Entity // actual value in tx
-}
-
-struct LockedKey {
-	table_name: String,
-	key: Entity
-}
-
-// Struct for store data of transaction
-struct Transaction {
-	id: u32,
-	on: bool, // true - transaction is executed
-	locked_keys: Arc<ConcHashMap<LockedKey, LockedEntity>> // keys and refs to values of locked entities
-}
-
-// Transactions data driver
-struct TransactionManager {
-	counter: Arc<Mutex<u32>>, // beacause need check overflow and get new value - AtomicUsize is not relevant
-	transactions: ConcHashMap<u32, Arc<Mutex<Transaction>>>
 }
 
 // Errors
@@ -132,27 +96,6 @@ impl PartialEq for Entity {
 	fn eq(&self, other: &Entity) -> bool {
 		self.fields == other.fields
 	}
-}
-
-impl Lock {
-	fn new() -> Lock {
-		Lock { lock_type: LockType::Read, tx_id: 0, condition: Arc::new((Mutex::new(false), Condvar::new())) }
-	}
-}
-
-impl PartialEq for Lock {
-	fn eq(&self, other: &Lock) -> bool {
-		self.tx_id == other.tx_id && self.lock_type == other.lock_type
-	}
-}
-
-impl Eq for Lock {}
-
-impl Hash for Lock {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.tx_id.hash(state);
-        self.lock_type.hash(state);
-    }
 }
 
 impl Hash for Field {
@@ -263,43 +206,6 @@ impl Table {
 		}
 	}
 
-	fn unlock_value(tx_id: u32, value_entity: Arc<Mutex<Entity>>) -> Result<(), PersistenceError> {
-		let mut mut_value_entity: MutexGuard<Entity> = value_entity.lock().unwrap();
-		debug!("Unlock key for tx {}", tx_id);
-		if mut_value_entity.lock.tx_id != tx_id {
-			Err(PersistenceError::WrongTransaction(mut_value_entity.lock.tx_id.clone(), tx_id.clone()))
-		} else {
-			let ref mut mut_lock: Lock = mut_value_entity.lock;
-			let &(ref lock_var, _) = &*mut_lock.condition;
-			let mut locked = lock_var.lock().unwrap();
-			*locked = false;
-			mut_lock.tx_id = DEFAULT_TX_ID;
-			Ok(())
-		}
-	}
-
-	fn lock_value(tx_id: &u32, key_desc: &EntityDescription, locked_transaction: &Transaction, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Entity {
-		let temp = value_entity.clone();
-		let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
-		debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}", 
-				Table::entity_to_json(key_entity, key_desc).unwrap(), mut_value_entity.lock.tx_id, mut_value_entity.lock.tx_id);
-		if mut_value_entity.lock.tx_id != *tx_id {
-			let ref mut lock_mut = mut_value_entity.lock;
-			let &(ref lock_var, ref condvar) = &*lock_mut.condition;
-			let mut locked = lock_var.lock().unwrap();
-			debug!("Current locked = {}", *locked);
-			while *locked {
-				locked = condvar.wait(locked).unwrap();
-			}
-			*locked = true;
-			lock_mut.tx_id = tx_id.clone();
-			locked_transaction.add_entity(key_entity.clone(), value_entity.clone());
-			debug!("Lock for key {} is set, tx updated", Table::entity_to_json(key_entity, key_desc).unwrap());
-		}
-		debug!("Value locked");
-		mut_value_entity.clone()
-	}
-
 	fn get_copy_of_locked_value(locked_value: Arc<Mutex<Entity>>) -> Entity {
 		let locked_value_unwrap = locked_value.lock().unwrap();
 		locked_value_unwrap.clone()
@@ -308,17 +214,17 @@ impl Table {
 	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		let locked_transaction = transaction.lock().unwrap();
-		let value_accessor = locked_transaction.locked_keys.find(key_entity);
+		let value_accessor = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
 		match value_accessor {
 			Some(locked_value) => {
 				debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-				Ok(Some(Table::get_copy_of_locked_value(locked_value.get().clone())))
+				Ok(Some(locked_value.value.clone()))
 			},
 			None => {
 				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
-						let locked_value = Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
+						let locked_value = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
 						Ok(Some(locked_value.clone()))
 					},
 					None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
@@ -331,27 +237,31 @@ impl Table {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
 		let locked_transaction = transaction.lock().unwrap();
-		debug!("Contains test = {}", locked_transaction.locked_keys.find(key_entity).is_some());
-		if !locked_transaction.locked_keys.find(key_entity).is_some() {
-			debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			match self.data.find_mut(key_entity) {
-				Some(mut accessor) => {
-					let value_entity: Entity = Table::lock_value(tx_id, &self.description.key, &locked_transaction, key_entity, accessor.get().clone());
-					Ok(value_entity)
-				},
-				None => {
-					debug!("Tx not contains key yet. Add key {}", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-					let mut new_key_entity = key_entity.clone();
-					new_key_entity.lock.tx_id = tx_id.clone();
-					let res = Table::lock_value(tx_id, &self.description.key, &locked_transaction, &new_key_entity, value_entity);
-					Ok(res)
+		let locked_value = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
+		//debug!("Contains test = {}", locked_transaction.locked_keys.find(key_entity).is_some());
+		match locked_value {
+			Some(value) => {
+				debug!("In tx {} found value {} by key {}", tx_id,
+					Table::entity_to_json(&value.value, &self.description.value).unwrap(),
+					Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				Ok(value.value.clone())
+			},
+			None => {
+				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				match self.data.find_mut(key_entity) {
+					Some(mut accessor) => {
+						TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
+						let res = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, value_entity);
+						Ok(res)
+					},
+					None => {
+						debug!("Tx not contains key yet. Add key {}", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+						let mut new_key_entity = key_entity.clone();
+						new_key_entity.lock.tx_id = tx_id.clone();
+						let res = TransactionManager::lock_value(tx_id, &self, &locked_transaction, &new_key_entity, value_entity);
+						Ok(res)
+					}
 				}
-			}
-		} else {
-			debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
-			match self.data.find(key_entity) {
-				Some(accessor) => Ok(accessor.get().lock().unwrap().clone()),
-				None => Err(PersistenceError::EntityNotFound(key_entity.clone()))
 			}
 		}
 	}
@@ -377,9 +287,7 @@ impl Table {
 	}
 
 	fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {
-		let &(ref lock_var, _) = &*value.lock().unwrap().lock.condition;
-		let locked = lock_var.lock().unwrap();
-		*locked
+		value.lock().unwrap().lock.is_locked()
 	}
 
 	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
@@ -527,81 +435,5 @@ impl DataBaseManager {
 
 	pub fn tx_stop(&self, tx_id: &u32) -> Result<(), PersistenceError> {
 		self.tx_manager.stop(tx_id)
-	}
-}
-
-impl TransactionManager {
-	fn new() -> TransactionManager {
-		TransactionManager { counter: Arc::new(Mutex::new(1)), transactions: ConcHashMap::<u32, Arc<Mutex<Transaction>>>::new() }
-	}
-
-	fn get_tx_id(&self) -> u32 {
-		let counter = self.counter.clone();
-		let mut counter_mut = counter.lock().unwrap();
-		if counter_mut.eq(&u32::max_value()) {
-				*counter_mut = 1;
-		};
-		let res = counter_mut.clone();
-		*counter_mut = *counter_mut + 1;
-		res
-	}
-	
-	fn get_tx(&self, tx_id: &u32) -> Result<Arc<Mutex<Transaction>>, PersistenceError> {
-		match self.transactions.find(&tx_id) {
-			Some(transaction) => {
-				debug!("Found tx with id = {}", tx_id);
-				Ok(transaction.get().clone())
-			},
-			None => {
-				debug!("Tx with id = {} not found", tx_id);
-				Err(PersistenceError::UndefinedTransaction)
-			}
-		}
-	}
-
-	fn start(&self) -> Result<u32, PersistenceError> {
-		let id = self.get_tx_id();
-		let transaction = Arc::new(Mutex::new(Transaction { 
-			id: id,
-			on: true, 
-			locked_keys: Arc::new(ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new()) 
-		}));
-		match self.transactions.insert(id, transaction) {
-			Some(_) => {
-				error!("Tx with id = {} already started", id);
-				Err(PersistenceError::TransactionAlreadyStarted(id))
-			},
-			None => {
-				debug!("Tx with id = {} started", id);
-				Ok(id)
-			}
-		}
-	}
-
-	fn stop(&self, id: &u32) -> Result<(), PersistenceError> {
-		debug!("Begin stop tx {}", id);
-		match self.transactions.remove(&id) {
-			Some(transaction) => {
-				let locked_transaction = transaction.lock().unwrap();
-				debug!("Lock tx for stop {}", locked_transaction.id);
-				for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
-					try!(Table::unlock_value(locked_transaction.id.clone(), locked_value.clone()));
-				};
-				locked_transaction.locked_keys.clear();
-				debug!("Tx with id = {} stopped", id);
-				Ok(())
-			},
-			None => Err(PersistenceError::UndefinedTransaction)
-		}
-	}
-}
-
-impl Transaction {
-	fn add_entity(&self, key: Entity, value: Arc<Mutex<Entity>>) -> bool {
-		self.locked_keys.insert(key, value).is_none()
-	}
-
-	fn remove_key(&self, key: Entity) -> bool {
-		self.locked_keys.remove(&key).is_some()
 	}
 }

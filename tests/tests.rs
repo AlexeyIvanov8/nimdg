@@ -62,7 +62,7 @@ fn put_test() {
     data_base_manager.add_data(&tx_id, &client_table_name, &key_one, &value_one).unwrap();
     let res_value = data_base_manager.get_data(&tx_id, &client_table_name, &key_one).unwrap().unwrap();
     info!("After insert one found value = {}, tx id = {}", res_value, tx_id);
-    data_base_manager.tx_stop(&tx_id);
+    data_base_manager.tx_stop(&tx_id).unwrap();
 
     let tx_id = data_base_manager.tx_start().unwrap();
     data_base_manager.add_data(&tx_id, &client_table_name, &key_one, &value_two);
