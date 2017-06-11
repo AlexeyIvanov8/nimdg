@@ -27,13 +27,13 @@ const DEFAULT_TX_ID: u32 = 0;
 
 #[derive(Debug, Clone)]
 pub struct Lock {
-	lock_type: LockType,
+	pub lock_type: LockType,
 	pub tx_id: u32,
 	condition: Arc<(Mutex<bool>, Condvar)>
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
-enum LockType {
+pub enum LockType {
 	Read,
 	Write
 }
@@ -65,7 +65,7 @@ pub struct TransactionManager {
 
 impl Lock {
 	pub fn new() -> Lock {
-		Lock { lock_type: LockType::Read, tx_id: 0, condition: Arc::new((Mutex::new(false), Condvar::new())) }
+		Lock { lock_type: LockType::Write, tx_id: 0, condition: Arc::new((Mutex::new(false), Condvar::new())) }
 	}
 
 	pub fn is_locked(&self) -> bool {
@@ -136,7 +136,7 @@ impl TransactionManager {
 			},
 			None => {
 				debug!("Tx with id = {} not found", tx_id);
-				Err(PersistenceError::UndefinedTransaction)
+				Err(PersistenceError::UndefinedTransaction(tx_id.clone()))
 			}
 		}
 	}
@@ -174,7 +174,7 @@ impl TransactionManager {
 				debug!("Tx with id = {} stopped", id);
 				Ok(())
 			},
-			None => Err(PersistenceError::UndefinedTransaction)
+			None => Err(PersistenceError::UndefinedTransaction(id.clone()))
 		}
 	}
 

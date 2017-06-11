@@ -69,4 +69,18 @@ fn put_test() {
     let res_value = data_base_manager.get_data(&tx_id, &client_table_name, &key_one).unwrap().unwrap();
     info!("After insert two found value = {}, tx id = {}", res_value, tx_id);
     data_base_manager.tx_stop(&tx_id);
+
+    let tx_id_1 = data_base_manager.tx_start().unwrap();
+    data_base_manager.add_data(&tx_id_1, &client_table_name, &key_two, &value_two).unwrap();
+
+    let tx_id_2 = data_base_manager.tx_start().unwrap();
+    let res_in_tx_1 = data_base_manager.get_data(&tx_id_1, &client_table_name, &key_two).unwrap().unwrap();
+    info!("Value in tx 1 id = {}, value = {}", tx_id_1, res_in_tx_1);
+    let res_in_tx_2 = data_base_manager.get_data(&tx_id_2, &client_table_name, &key_two);
+    info!("Value in tx 2 id = {}, value = {:?}", tx_id_2, res_in_tx_2);
+
+    data_base_manager.tx_stop(&tx_id_1).unwrap();
+    let res_in_tx_2 = data_base_manager.get_data(&tx_id_2, &client_table_name, &key_two).unwrap().unwrap();
+    info!("Value in tx 2 after commit tx 1 id = {}, value = {}", tx_id_2, res_in_tx_2);
+    data_base_manager.tx_stop(&tx_id_2).unwrap();
 }

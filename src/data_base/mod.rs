@@ -24,7 +24,7 @@ pub mod meta;
 pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
-use data_base::transaction::{TransactionManager, Lock, LockedValue};
+use data_base::transaction::{TransactionManager, Lock, LockType, LockedValue};
 
 // Top struct for interaction with tables
 pub struct DataBaseManager {
@@ -67,7 +67,7 @@ pub enum PersistenceError {
 	TableNotFound(String),
 	EntityNotFound(Entity),
 	Undefined(String),
-	UndefinedTransaction,
+	UndefinedTransaction(u32),
 	TransactionAlreadyStarted(u32),
 	WrongTransaction(u32, u32) // real tx_id, expected tx_id
 }
@@ -224,13 +224,22 @@ impl Table {
 				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
-						let locked_value = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
-						Ok(Some(locked_value.clone()))
+						match Table::get_lock_type(accessor.get().clone()) {
+							LockType::Read => {
+								let locked_value = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
+								Ok(Some(locked_value.clone()))
+							},
+							LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
+						}
 					},
 					None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
 				}
 			}
 		} 
+	}
+
+	fn get_lock_type(entity: Arc<Mutex<Entity>>) -> LockType {
+		entity.lock().unwrap().lock.lock_type.clone()
 	}
 
 	fn get_lock_for_put(&self, tx_id: &u32, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Result<Entity, PersistenceError> {
