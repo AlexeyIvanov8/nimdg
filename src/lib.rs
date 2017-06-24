@@ -153,7 +153,7 @@ pub fn mount_api() {
                     let db_manager = client.app.get_data_base_manager();
                     db_manager.print_info();
                     // client.text("Some usefull info".to_string())
-                    client.json(&db_manager.get_tables_list())
+                    client.json(&db_manager.get_tables_json_list())
                 })
             });
 
@@ -339,7 +339,7 @@ pub fn mount_api() {
                                 info!("Table with name {}", name);
                                 let table_desc = client.app
                                     .get_data_base_manager()
-                                    .get_table(&String::from(name));
+                                    .get_table_json(&String::from(name));
                                 match table_desc {
                                     Some(table_desc) => client.json(&table_desc),
                                     None => {

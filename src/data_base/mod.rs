@@ -30,7 +30,7 @@ use data_base::transaction::{TransactionManager, Lock, LockType, LockedValue};
 pub struct DataBaseManager {
     type_descriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
     table_descriptions: ConcHashMap<String, TableDescription>, //BTreeMap::<String, TableDescription>::new();
-	tables: ConcHashMap<String, Table>,
+	tables: ConcHashMap<String, Arc<Table>>,
 	tx_manager: Arc<TransactionManager>
 }
 
@@ -194,6 +194,10 @@ impl Table {
 		Ok(())
 	}
 
+	pub fn raw_put(&self, key: Entity, value: Entity) -> Option<Arc<Mutex<Entity>>> {
+		self.data.insert(key, Arc::new(Mutex::new(value)))
+	}
+
 	fn get(&self, key_entity: &Entity) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		match self.data.find(&key_entity) {
 			Some(data) => {
@@ -226,8 +230,8 @@ impl Table {
 					Some(mut accessor) => {
 						match Table::get_lock_type(accessor.get().clone()) {
 							LockType::Read => {
-								let locked_value = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
-								Ok(Some(locked_value.clone()))
+								let locked_value = TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, Some(accessor.get().clone()));
+								Ok(locked_value)
 							},
 							LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
 						}
@@ -242,7 +246,7 @@ impl Table {
 		entity.lock().unwrap().lock.lock_type.clone()
 	}
 
-	fn get_lock_for_put(&self, tx_id: &u32, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Result<Entity, PersistenceError> {
+	fn get_lock_for_put(&self, tx_id: &u32, key_entity: &Entity, inserted_value: Arc<Mutex<Entity>>) -> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
 		let locked_transaction = transaction.lock().unwrap();
@@ -253,22 +257,24 @@ impl Table {
 				debug!("In tx {} found value {} by key {}", tx_id,
 					Table::entity_to_json(&value.value, &self.description.value).unwrap(),
 					Table::entity_to_json(key_entity, &self.description.key).unwrap());
-				Ok(value.value.clone())
+				Ok(Some(value.value.clone()))
 			},
 			None => {
 				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
-						TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, accessor.get().clone());
-						let res = TransactionManager::lock_value(tx_id, &self, &locked_transaction, key_entity, value_entity);
-						Ok(res)
+						TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, Some(accessor.get().clone()));
+						//let res = TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, value_entity);
+						Ok(None)
 					},
 					None => {
 						debug!("Tx not contains key yet. Add key {}", Table::entity_to_json(key_entity, &self.description.key).unwrap());
 						let mut new_key_entity = key_entity.clone();
 						new_key_entity.lock.tx_id = tx_id.clone();
-						let res = TransactionManager::lock_value(tx_id, &self, &locked_transaction, &new_key_entity, value_entity);
-						Ok(res)
+						locked_transaction.add_entity(self, key_entity.clone(), None, inserted_value.lock().unwrap().clone());
+						//TransactionManager::lock_value(tx_id, self, &locked_transaction, &new_key_entity, Some(inserted_value));
+						debug!("Return ok for get_lock_for_put");
+						Ok(None)
 					}
 				}
 			}
@@ -304,12 +310,12 @@ impl Table {
 		let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
 		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
 		let inserted_value = Arc::new(Mutex::new(value_entity));
-		let new_value_entity = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
+		let lock_result = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
 
-		debug!("Upsert value = {} with key = {}, locked = {}", Table::entity_to_json(&new_value_entity, &self.description.value).unwrap(),
-			 Table::entity_to_json(&key_entity, &self.description.key).unwrap(), Table::get_lock_value(inserted_value.clone()));
+		debug!("Upsert value = {} with key = {}", Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
+			 Table::entity_to_json(&key_entity, &self.description.key).unwrap());
 
-		self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
+		//self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
 		for (k, v) in self.data.iter() {
 			debug!("    Current data: {} -> {}", Table::entity_to_json(k, &self.description.key).unwrap(),
 				Table::entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
@@ -323,7 +329,7 @@ impl DataBaseManager {
         let mut db_manager = DataBaseManager { 
             type_descriptions: BTreeMap::new(),
             table_descriptions: ConcHashMap::<String, TableDescription>::new(),
-			tables: ConcHashMap::<String, Table>::new(),
+			tables: ConcHashMap::<String, Arc<Table>>::new(),
 			tx_manager: Arc::new(TransactionManager::new()) };
 
         let string_type = TypeDescription {
@@ -392,17 +398,21 @@ impl DataBaseManager {
         println!("I'm a data base manager");
     }
 
-    pub fn get_tables_list(&self) -> rustless::json::JsonValue {
+    pub fn get_tables_json_list(&self) -> rustless::json::JsonValue {
         let res = self.table_descriptions.iter().map(|(k, v)| {
 			(k.clone(), v.to_json())
 		}).collect();
 		rustless::json::JsonValue::Object(res)
     }
 
-	pub fn get_table(&self, name: &String) -> Option<rustless::json::JsonValue> {
+	pub fn get_table_json(&self, name: &String) -> Option<rustless::json::JsonValue> {
 		//self.table_descriptions.find(name).map(|table| { table.get().to_json() })
-	self.tables.find(name).map(|table| { table.get().description.to_json() })
+		self.tables.find(name).map(|table| { table.get().description.to_json() })
 	} 
+
+	pub fn get_table(&self, name: &String) -> Option<Arc<Table>> {
+		self.tables.find(name).map(|accessor| accessor.get().clone())
+	}
 
 	/** Add new table by he view description
 	 * return - table name or error description is adding fail */
@@ -411,7 +421,7 @@ impl DataBaseManager {
         	let table_desc = try!(TableDescription::from_view(&table_description, &self.type_descriptions));
 			self.tables.insert(
 				table_desc.name.clone(), 
-				Table { description: table_desc, data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(), tx_manager: self.tx_manager.clone() });
+				Arc::new(Table { description: table_desc, data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(), tx_manager: self.tx_manager.clone() }));
 			//self.table_descriptions.insert(table_desc.name.clone(), table_desc);
 			Ok(table_description.name.clone())
 		} else {
@@ -443,6 +453,6 @@ impl DataBaseManager {
 	}
 
 	pub fn tx_stop(&self, tx_id: &u32) -> Result<(), PersistenceError> {
-		self.tx_manager.stop(tx_id)
+		self.tx_manager.stop(self, tx_id)
 	}
 }

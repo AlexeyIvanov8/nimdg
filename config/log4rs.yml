@@ -20,6 +20,6 @@ loggers:
       - requests
     additive: false
   nimdg:
-    level: info
+    level: trace
   tests:
     level: trace
