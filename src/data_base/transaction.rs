@@ -184,6 +184,30 @@ impl TransactionManager {
 				for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
 					locked_value.update_reference();
 					try!(TransactionManager::unlock_value(locked_transaction.id.clone(), data_base_manager, locked_key, locked_value));
+					match locked_value.reference {
+						Some(ref reference) => {},
+						None => {
+							let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
+							table.raw_put(locked_key.key.clone(), locked_value.value.clone());
+						}
+					}
+				};
+				locked_transaction.locked_keys.clear();
+				debug!("Tx with id = {} stopped", id);
+				Ok(())
+			},
+			None => Err(PersistenceError::UndefinedTransaction(id.clone()))
+		}
+	}
+
+	pub fn rollback(&self, data_base_manager: &DataBaseManager, id: &u32) -> Result<(), PersistenceError> {
+		debug!("Begin rollback {}", id);
+		match self.transactions.remove(&id) {
+			Some(transaction) => {
+				let locked_transaction = transaction.lock().unwrap();
+				debug!("Lock tx for stop {}", locked_transaction.id);
+				for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
+					try!(TransactionManager::unlock_value(locked_transaction.id.clone(), data_base_manager, locked_key, locked_value));
 				};
 				locked_transaction.locked_keys.clear();
 				debug!("Tx with id = {} stopped", id);
@@ -211,8 +235,8 @@ impl TransactionManager {
 				}
 			},
 			None => {
-				let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
-				table.raw_put(locked_key.key.clone(), locked_value.value.clone());
+				//let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
+				//table.raw_put(locked_key.key.clone(), locked_value.value.clone());
 				Ok(())
 			}
 		}

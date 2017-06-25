@@ -15,12 +15,9 @@ use nimdg::data_base::meta::TableDescriptionView;
 
 mod data_base_test;
 
-#[test]
-fn put_test() {
-    log4rs::init_file("config/log4rs.yml", Default::default()).unwrap();
-    //env_logger::init().unwrap();
+fn create_test_data_base() -> DataBaseManager {
+    let client_table_name: String = String::from("Client");
     let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
-    let client_table_name = String::from("Client");
     let table_desc = rustless::json::JsonValue::from_str("{
         \"name\": \"Client\", 
         \"key\": {
@@ -36,6 +33,26 @@ fn put_test() {
         }
     }");
 
+    let table_desc_json = table_desc.unwrap();
+    info!("Table desc json = {}", table_desc_json);
+    let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
+    let table_desc_view = table_desc_view_res.unwrap();
+    info!("Table desc view = {:?}", table_desc_view);
+    data_base_manager.add_table(table_desc_view);
+    info!("Added table {}", data_base_manager.get_table_json(&client_table_name).unwrap());
+
+    data_base_manager
+}
+
+#[test]
+fn put_test() {
+    log4rs::init_file("config/log4rs.yml", Default::default()).unwrap();
+    //env_logger::init().unwrap();
+
+    let client_table_name: String = String::from("Client");
+
+    let data_base_manager = create_test_data_base();
+
     let key_one = rustless::json::JsonValue::from_str("{\"id\": 2 }").unwrap();
     let value_one = rustless::json::JsonValue::from_str("{
         \"full_name\": \"John Doe\",
@@ -47,14 +64,6 @@ fn put_test() {
         \"full_name\": \"David K\",
         \"age\": 45
     }").unwrap();
-
-    let table_desc_json = table_desc.unwrap();
-    info!("Table desc json = {}", table_desc_json);
-    let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
-    let table_desc_view = table_desc_view_res.unwrap();
-    info!("Table desc view = {:?}", table_desc_view);
-    data_base_manager.add_table(table_desc_view);
-    info!("Added table {}", data_base_manager.get_table_json(&client_table_name).unwrap());
 
     let tx_id = data_base_manager.tx_start().unwrap();
     let none_data = data_base_manager.get_data(&tx_id, &client_table_name, &key_one).unwrap();
@@ -83,4 +92,36 @@ fn put_test() {
     let res_in_tx_2 = data_base_manager.get_data(&tx_id_2, &client_table_name, &key_two).unwrap().unwrap();
     info!("Value in tx 2 after commit tx 1 id = {}, value = {}", tx_id_2, res_in_tx_2);
     data_base_manager.tx_stop(&tx_id_2).unwrap();
+}
+
+#[test]
+fn rollback_test() {
+    let client_table_name: String = String::from("Client");
+    let data_base_manager = create_test_data_base();
+
+    let key_one = rustless::json::JsonValue::from_str("{\"id\": 2 }").unwrap();
+    let value_one = rustless::json::JsonValue::from_str("{
+        \"full_name\": \"John Doe\",
+        \"age\": 23
+    }").unwrap();
+    
+    info!("Begin rollback test");
+    let tx_id = data_base_manager.tx_start().unwrap();
+    let res = data_base_manager.add_data(&tx_id, &client_table_name, &key_one, &value_one);
+    info!("Add data = {:?}", res);
+    assert!(res.is_ok());
+    let stored_value_one = data_base_manager.get_data(&tx_id, &client_table_name, &key_one);
+    info!("Getting uncommited data = {:?}", stored_value_one);
+    assert!(stored_value_one.is_ok());
+    assert!(stored_value_one.unwrap().is_some());
+    
+    data_base_manager.tx_rollback(&tx_id);
+    info!("Tx is rollback {}", tx_id);
+
+    let tx_id_2 = data_base_manager.tx_start().unwrap();
+    let stored_value_one_after = data_base_manager.get_data(&tx_id_2, &client_table_name, &key_one);
+    info!("Getting uncommited data after rollback = {:?}", stored_value_one_after);
+    assert!(stored_value_one_after.is_ok());
+    assert!(stored_value_one_after.unwrap().is_none());
+    data_base_manager.tx_stop(&tx_id_2);
 }
