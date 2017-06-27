@@ -132,7 +132,7 @@ fn get_key_and_value(params: &rustless::json::JsonValue)
 
 pub fn mount_api() {
     //env_logger::init().unwrap();
-    log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
+    log4rs::init_file("config/log4rs.yml", Default::default()).unwrap();
     info!("Hello, world!");
 
     let api = Api::build(|api| {
