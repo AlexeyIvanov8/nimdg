@@ -1,7 +1,9 @@
+
 extern crate iron;
 extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate serde_json;
+extern crate chrono;
 
 use std;
 use std::hash::{Hash, Hasher};
@@ -25,6 +27,9 @@ pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
 use data_base::transaction::{TransactionManager, Lock, LockType, LockedValue};
+
+use self::chrono::prelude::*;
+
 
 // Top struct for interaction with tables
 pub struct DataBaseManager {
@@ -378,9 +383,30 @@ impl DataBaseManager {
 			})
 		};
 
+		let date_fmt = "%Y-%m-%d%:z";
+
+		let date_type = TypeDescription {
+			name: "date".to_string(),
+			reader: Box::new(move |ref json| {
+				match *json {
+					&rustless::json::JsonValue::String(ref value) =>
+						match DateTime::parse_from_str(value.clone().as_ref(), date_fmt) {
+							Ok(date) => encode(&date.date().format(date_fmt).to_string(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+							Err(error) => Err(IoEntityError::Read(String::from("Non parseable date ") + error.to_string().as_str()))
+						},
+					_ => Err(IoEntityError::Read(String::from("Expected type Date") + date_fmt))
+				}
+			}),
+			writer: Box::new(|ref value| {
+				let date_string = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+				Ok(rustless::json::JsonValue::String(date_string))
+			})
+		};
+
 		try!(db_manager.add_type(u64_type));
 		try!(db_manager.add_type(string_type));
 		try!(db_manager.add_type(i64_type));
+		try!(db_manager.add_type(date_type));
 
         Ok(db_manager)
     }
