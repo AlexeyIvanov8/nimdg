@@ -46,9 +46,8 @@ fn create_test_data_base() -> DataBaseManager {
 
 #[test]
 fn put_test() {
-    log4rs::init_file("config/log4rs.yml", Default::default()).unwrap();
-    //env_logger::init().unwrap();
-
+    log4rs::init_file("config/log4rs.yml", Default::default());
+    
     let client_table_name: String = String::from("Client");
 
     let data_base_manager = create_test_data_base();
@@ -96,6 +95,8 @@ fn put_test() {
 
 #[test]
 fn rollback_test() {
+    log4rs::init_file("config/log4rs.yml", Default::default());
+
     let client_table_name: String = String::from("Client");
     let data_base_manager = create_test_data_base();
 
@@ -124,4 +125,53 @@ fn rollback_test() {
     assert!(stored_value_one_after.is_ok());
     assert!(stored_value_one_after.unwrap().is_none());
     data_base_manager.tx_stop(&tx_id_2);
+}
+
+#[test]
+fn date_test() {
+    log4rs::init_file("config/log4rs.yml", Default::default());
+
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    let table_desc = rustless::json::JsonValue::from_str("{
+        \"name\": \"Times\", 
+        \"key\": {
+            \"fields\": {
+                \"id\": \"u64\"
+            } 
+        },
+        \"value\": {
+            \"fields\": {
+                \"date\": \"date\"
+             }
+        }
+    }");
+
+    match table_desc {
+        Ok(table_desc_json) => {
+            info!("***************Table desc json = {}", table_desc_json);
+            let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
+            let table_desc_view = table_desc_view_res.unwrap();
+            info!("Table desc view = {:?}", table_desc_view);
+            data_base_manager.add_table(table_desc_view).map_err(|error| info!("Error add table {}", error));
+            println!("add table");
+            info!("Added table {}", data_base_manager.get_table_json(&String::from("Times")).unwrap());
+
+            let key = rustless::json::JsonValue::from_str("{\"id\": 2 }").unwrap();
+            let value = rustless::json::JsonValue::from_str("{
+                \"date\": \"02-03-2016\"
+            }").unwrap();
+            println!("prepare datas");
+            let tx_id = data_base_manager.tx_start().unwrap();
+            info!("Begin insert date value = {}", value);
+            data_base_manager.add_data(&tx_id, &String::from("Times"), &key, &value).unwrap();
+            data_base_manager.tx_stop(&tx_id);
+            
+            let tx_id = data_base_manager.tx_start().unwrap();
+            let after = data_base_manager.get_data(&tx_id, &String::from("Times"), &key).unwrap().unwrap();
+            info!("After date = {}", after);
+            data_base_manager.tx_stop(&tx_id);
+        },
+        Err(error) => info!("Error ={}", error)
+    }
+
 }

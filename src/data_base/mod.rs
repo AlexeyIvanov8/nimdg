@@ -383,16 +383,16 @@ impl DataBaseManager {
 			})
 		};
 
-		let date_fmt = "%Y-%m-%d%:z";
+		let date_fmt = "%d-%m-%Y";
 
 		let date_type = TypeDescription {
 			name: "date".to_string(),
 			reader: Box::new(move |ref json| {
 				match *json {
-					&rustless::json::JsonValue::String(ref value) =>
-						match DateTime::parse_from_str(value.clone().as_ref(), date_fmt) {
-							Ok(date) => encode(&date.date().format(date_fmt).to_string(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-							Err(error) => Err(IoEntityError::Read(String::from("Non parseable date ") + error.to_string().as_str()))
+					&rustless::json::JsonValue::String(ref value) => 
+					    match NaiveDate::parse_from_str(value.clone().as_ref(), date_fmt) {
+							Ok(date) => encode(&date.format(date_fmt).to_string(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+							Err(error) => Err(IoEntityError::Read(String::from("Non parseable date ") + value.clone().as_ref() + error.to_string().as_str()))
 						},
 					_ => Err(IoEntityError::Read(String::from("Expected type Date") + date_fmt))
 				}
