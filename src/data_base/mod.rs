@@ -29,6 +29,7 @@ use data_base::meta::{TypeDescription, EntityDescription, TableDescription, Tabl
 use data_base::transaction::{TransactionManager, Lock, LockType, LockedValue};
 
 use self::chrono::prelude::*;
+use std::str::FromStr;
 
 
 // Top struct for interaction with tables
@@ -338,7 +339,7 @@ impl DataBaseManager {
 			tx_manager: Arc::new(TransactionManager::new()) };
 
         let string_type = TypeDescription {
-            name: "String".to_string(),
+            name: "string".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => 
@@ -383,7 +384,7 @@ impl DataBaseManager {
 			})
 		};
 
-		let date_fmt = "%d-%m-%Y";
+		let date_fmt = "%Y-%m-%d";
 
 		let date_type = TypeDescription {
 			name: "date".to_string(),
@@ -391,8 +392,10 @@ impl DataBaseManager {
 				match *json {
 					&rustless::json::JsonValue::String(ref value) => 
 					    match NaiveDate::parse_from_str(value.clone().as_ref(), date_fmt) {
-							Ok(date) => encode(&date.format(date_fmt).to_string(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-							Err(error) => Err(IoEntityError::Read(String::from("Non parseable date ") + value.clone().as_ref() + error.to_string().as_str()))
+							Ok(date) => encode(&date.format(date_fmt).to_string(), bincode::SizeLimit::Infinite)
+								.map_err(|err| IoEntityError::Read(err.to_string())),
+							Err(error) => Err(IoEntityError::Read(
+								String::from("Non parseable date ") + value.clone().as_ref() + error.to_string().as_str()))
 						},
 					_ => Err(IoEntityError::Read(String::from("Expected type Date") + date_fmt))
 				}
@@ -403,10 +406,31 @@ impl DataBaseManager {
 			})
 		};
 
+		let date_time_type = TypeDescription {
+			name: "date_time".to_string(),
+			reader: Box::new(move |ref json| {
+				match *json {
+					&rustless::json::JsonValue::String(ref value) =>
+						match DateTime::parse_from_rfc3339(value.clone().as_ref()) {
+							Ok(date_time) => encode(&date_time.timestamp(), bincode::SizeLimit::Infinite)
+								.map_err(|err| IoEntityError::Read(err.to_string())),
+							Err(error) => Err(IoEntityError::Read(
+								String::from("Non parseable date_time ") + value.clone().as_ref() + error.to_string().as_str()))
+						},
+					_ => Err(IoEntityError::Read(String::from("Expected type date_time ") + json.to_string().as_str()))
+				}
+			}),
+			writer: Box::new(|ref value| {
+				let timestamp = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+				Ok(rustless::json::JsonValue::String(Utc.timestamp(timestamp, 0).to_rfc3339()))
+			})
+		};
+
 		try!(db_manager.add_type(u64_type));
 		try!(db_manager.add_type(string_type));
 		try!(db_manager.add_type(i64_type));
 		try!(db_manager.add_type(date_type));
+		try!(db_manager.add_type(date_time_type));
 
         Ok(db_manager)
     }

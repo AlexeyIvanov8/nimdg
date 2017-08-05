@@ -27,7 +27,7 @@ fn create_test_data_base() -> DataBaseManager {
         },
         \"value\": {
             \"fields\": {
-                \"full_name\": \"String\",
+                \"full_name\": \"string\",
                 \"age\": \"u64\"
              }
         }
@@ -142,6 +142,7 @@ fn date_test() {
         \"value\": {
             \"fields\": {
                 \"date\": \"date\"
+                \"date_time\": \"date_time\"
              }
         }
     }");
@@ -158,7 +159,8 @@ fn date_test() {
 
             let key = rustless::json::JsonValue::from_str("{\"id\": 2 }").unwrap();
             let value = rustless::json::JsonValue::from_str("{
-                \"date\": \"02-03-2016\"
+                \"date\": \"2016-02-03\",
+                \"date_time\": \"2017-05-21T13:41:00+03:00\"
             }").unwrap();
             println!("prepare datas");
             let tx_id = data_base_manager.tx_start().unwrap();
