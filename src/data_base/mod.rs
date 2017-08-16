@@ -118,24 +118,31 @@ impl Hash for Entity {
 
 // Table impl
 impl Table {
-	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
-		if json.is_object() {
-			let json_object = try!(json.as_object().ok_or(IoEntityError::Read("Json object not found".to_string())));
-			// 1. select types for json fields
-			let selected_values = json_object.iter().filter_map(|(name, value)| {
+	fn select_field_descriptions(
+		description: &EntityDescription, 
+		entity_json: &rustless::json::Object) -> 
+			BTreeMap<String, (u16, Arc<Box<TypeDescription>>, rustless::json::JsonValue)> {
+		entity_json.iter().filter_map(|(name, value)| {
 				let type_desc = description.get_field(name);
 				let field_id = description.get_field_id(name);
 
 				if let (Some(type_desc), Some(field_id)) =
 						(type_desc, field_id) {
-					Some((name.clone(), (field_id, type_desc.clone(), value)))
+					Some((name.clone(), (field_id.clone(), type_desc.clone(), value.clone())))
 				} else {
 					None
 				}
 			}).collect::<BTreeMap<
 					String, 
-					(&u16, Arc<Box<TypeDescription>>, &rustless::json::JsonValue)
-				>>();
+					(u16, Arc<Box<TypeDescription>>, rustless::json::JsonValue)
+				>>()
+	}
+
+	fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
+		if json.is_object() {
+			let json_object = try!(json.as_object().ok_or(IoEntityError::Read("Json object not found".to_string())));
+			// 1. select types for json fields
+			let selected_values = Table::select_field_descriptions(description, json_object);
 			let selected_values_keys = selected_values.keys().map(|key| key.clone()).collect::<HashSet<String>>();
 				
 			// 2. check what all fields is typed and 
@@ -148,14 +155,23 @@ impl Table {
 
 			if !unselected_json_keys.is_empty() || !unselected_typed_keys.is_empty() {
 				Err(IoEntityError::Read(
-					"Found unselected json values = [".to_string() + 
-					unselected_json_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + 
-					"] and unused entity fields =[" +
-					unselected_typed_keys.iter().fold(String::new(), |acc, ref key| { acc + key.as_str() }).as_str() + "]"))
+						"Found unselected json values = [".to_string()
+						+ unselected_json_keys.iter()
+							.fold(
+								String::new(), 
+								|acc, ref key| { acc + key.as_str() }).as_str() 
+						+ "] and unused entity fields =[" 
+						+ unselected_typed_keys.iter()
+						.fold(
+							String::new(), 
+							|acc, ref key| { acc + key.as_str() }).as_str() 
+						+ "]"
+					)
+				)
 			}
 			else {
 				let fields: Result<BTreeMap<u16, Field>, _> = selected_values.iter()
-					.map(|(_, &(&field_id, ref type_desc, ref value))| 
+					.map(|(_, &(field_id, ref type_desc, ref value))| 
 						((type_desc.reader)(&value)).map(|value| { 
 							(field_id, Field { data: value }) 
 						}))
@@ -169,14 +185,20 @@ impl Table {
 	}
 
 	fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, IoEntityError> {
-		let json_object: BTreeMap<String, rustless::json::JsonValue> = try!(entity.fields.iter().filter_map(|(type_id, value)| {
-			let field_name = entity_description.ids_map.get(type_id);
-			let type_desc = field_name.and_then(|field_name| 
-				entity_description.fields
-					.get(field_name)
-					.map(|type_desc| (field_name, type_desc)) );
-			type_desc.map(|(name, type_desc)| { ((type_desc.writer)(&value.data)).map(|data| (name.clone(), data)) })
-		}).collect());//::<BTreeMap<String, rustless::json::JsonValue>>();
+		let json_object: BTreeMap<String, rustless::json::JsonValue> = try!(
+			entity.fields.iter()
+				.filter_map(|(type_id, value)| {
+					let field_name = entity_description.ids_map.get(type_id);
+					let type_desc = field_name.and_then(|field_name| 
+						entity_description.fields
+							.get(field_name)
+							.map(|type_desc| (field_name, type_desc)) );
+					type_desc.map(|(name, type_desc)| { 
+						((type_desc.writer)(&value.data))
+							.map(|data| (name.clone(), data)) 
+					})
+				}).collect()
+		);
 
 		if json_object.len() != entity.fields.len() {
 			let unset = entity.fields.iter()
@@ -194,8 +216,14 @@ impl Table {
 	}
 
 	pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
-		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
+		let key_entity = try!(
+			Table::json_to_entity(key, &self.description.key)
+				.map_err(|err| PersistenceError::IoEntity(err))
+		);
+		let value_entity = try!(
+			Table::json_to_entity(value, &self.description.value)
+				.map_err(|err| PersistenceError::IoEntity(err))
+		);
 		self.data.insert(key_entity, Arc::new(Mutex::new(value_entity)));
 		Ok(())
 	}
@@ -227,16 +255,26 @@ impl Table {
 		let value_accessor = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
 		match value_accessor {
 			Some(locked_value) => {
-				debug!("Lock for key = {} already taken", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				debug!(
+					"Lock for key = {} already taken", 
+					Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				Ok(Some(locked_value.value.clone()))
 			},
 			None => {
-				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				debug!(
+					"Entity with key = {} not locked yet", 
+					Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
 						match Table::get_lock_type(accessor.get().clone()) {
 							LockType::Read => {
-								let locked_value = TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, Some(accessor.get().clone()));
+								let locked_value = TransactionManager::lock_value(
+									tx_id, 
+									self, 
+									&locked_transaction, 
+									key_entity, 
+									Some(accessor.get().clone())
+								);
 								Ok(locked_value)
 							},
 							LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
@@ -252,7 +290,12 @@ impl Table {
 		entity.lock().unwrap().lock.lock_type.clone()
 	}
 
-	fn get_lock_for_put(&self, tx_id: &u32, key_entity: &Entity, inserted_value: Arc<Mutex<Entity>>) -> Result<Option<Entity>, PersistenceError> {
+	fn get_lock_for_put(
+			&self, 
+			tx_id: &u32, 
+			key_entity: &Entity,
+			inserted_value: Arc<Mutex<Entity>>) 
+				-> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		// Try get lock on key
 		let locked_transaction = transaction.lock().unwrap();
@@ -262,23 +305,34 @@ impl Table {
 			Some(value) => {
 				debug!("In tx {} found value {} by key {}", tx_id,
 					Table::entity_to_json(&value.value, &self.description.value).unwrap(),
-					Table::entity_to_json(key_entity, &self.description.key).unwrap());
+					Table::entity_to_json(key_entity, &self.description.key).unwrap()
+					);
 				Ok(Some(value.value.clone()))
 			},
 			None => {
-				debug!("Entity with key = {} not locked yet", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				debug!(
+					"Entity with key = {} not locked yet", 
+					Table::entity_to_json(key_entity, &self.description.key).unwrap()
+				);
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
-						TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, Some(accessor.get().clone()));
-						//let res = TransactionManager::lock_value(tx_id, self, &locked_transaction, key_entity, value_entity);
+						TransactionManager::lock_value(
+							tx_id, 
+							self,
+							&locked_transaction, 
+							key_entity, 
+							Some(accessor.get().clone())
+						);
 						Ok(None)
 					},
 					None => {
-						debug!("Tx not contains key yet. Add key {}", Table::entity_to_json(key_entity, &self.description.key).unwrap());
+						debug!(
+							"Tx not contains key yet. Add key {}", 
+							Table::entity_to_json(key_entity, &self.description.key).unwrap()
+						);
 						let mut new_key_entity = key_entity.clone();
 						new_key_entity.lock.tx_id = tx_id.clone();
 						locked_transaction.add_entity(self, key_entity.clone(), None, inserted_value.lock().unwrap().clone());
-						//TransactionManager::lock_value(tx_id, self, &locked_transaction, &new_key_entity, Some(inserted_value));
 						debug!("Return ok for get_lock_for_put");
 						Ok(None)
 					}
@@ -287,8 +341,15 @@ impl Table {
 		}
 	}
 
-	pub fn tx_get(&self, tx_id: &u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
-		let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+	pub fn tx_get(
+			&self, 
+			tx_id: &u32, 
+			key: &rustless::json::JsonValue) 
+				-> Result<Option<rustless::json::JsonValue>, PersistenceError> {
+		let key_entity = try!(
+			Table::json_to_entity(key, &self.description.key)
+			.map_err(|err| PersistenceError::IoEntity(err))
+		);
 		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, &key_entity));
 		match locked_value {
 			Some(value) => {
@@ -311,15 +372,28 @@ impl Table {
 		value.lock().unwrap().lock.is_locked()
 	}
 
-	pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
+	pub fn tx_put(
+			&self, 
+			tx_id: &u32, 
+			key: &rustless::json::JsonValue, 
+			value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
 		debug!("Tx put started");
-		let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-		let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
+		let key_entity: Entity = try!(
+			Table::json_to_entity(key, &self.description.key)
+				.map_err(|err| PersistenceError::IoEntity(err))
+		);
+		let value_entity = try!(
+			Table::json_to_entity(value, &self.description.value)
+				.map_err(|err| PersistenceError::IoEntity(err))
+		);
 		let inserted_value = Arc::new(Mutex::new(value_entity));
 		let lock_result = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
 
-		debug!("Upsert value = {} with key = {}", Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
-			 Table::entity_to_json(&key_entity, &self.description.key).unwrap());
+		debug!(
+			"Upsert value = {} with key = {}", 
+			Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
+			Table::entity_to_json(&key_entity, &self.description.key).unwrap()
+		);
 
 		//self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
 		for (k, v) in self.data.iter() {
@@ -344,7 +418,7 @@ impl DataBaseManager {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => 
 						encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => Err(IoEntityError::Read(String::from("Expected type String:") + json.to_string().as_str()))
+                    _ => Err(IoEntityError::Read(format!("Expected type String: {}", json)))
                 }
             }),
             writer: Box::new(|value: &Vec<u8>| {
@@ -360,7 +434,7 @@ impl DataBaseManager {
                     rustless::json::JsonValue::U64(value) =>
 						encode(&value.clone(), bincode::SizeLimit::Infinite)
 							.map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => Err(IoEntityError::Read(String::from("Expected type u64: ") + json.to_string().as_str()))
+                    _ => Err(IoEntityError::Read(format!("Expected type u64: {}", json)))
                 }
             }),
             writer: Box::new(|ref value| {
@@ -375,13 +449,8 @@ impl DataBaseManager {
 				match json.clone().as_i64() {
 					Some(value) => 
 						encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-					None => Err(IoEntityError::Read(String::from("Expected type i64: ") + json.to_string().as_str()))
+					None => Err(IoEntityError::Read(format!("Expected type i64: {}", json)))
 				}
-				/*match *json {
-					&rustless::json::JsonValue::I64(value) => 
-						encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-					_ => Err(IoEntityError::Read(String::from("Expected type i64: ") + json.to_string().as_str()))
-				}*/
 			}),
 			writer: Box::new(|ref value| {
 				let i64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
@@ -399,10 +468,9 @@ impl DataBaseManager {
 					    match NaiveDate::parse_from_str(value.clone().as_ref(), date_fmt) {
 							Ok(date) => encode(&date.format(date_fmt).to_string(), bincode::SizeLimit::Infinite)
 								.map_err(|err| IoEntityError::Read(err.to_string())),
-							Err(error) => Err(IoEntityError::Read(
-								String::from("Non parseable date ") + value.clone().as_ref() + error.to_string().as_str()))
+							Err(error) => Err(IoEntityError::Read(format!("Non parseable date {}, {}", value, error)))
 						},
-					_ => Err(IoEntityError::Read(String::from("Expected type date: ") + json.to_string().as_str() + ", format = " + date_fmt))
+					_ => Err(IoEntityError::Read(format!("Expected type date: {}, format = {}", json, date_fmt)))
 				}
 			}),
 			writer: Box::new(|ref value| {
@@ -419,10 +487,9 @@ impl DataBaseManager {
 						match DateTime::parse_from_rfc3339(value.clone().as_ref()) {
 							Ok(date_time) => encode(&date_time.timestamp(), bincode::SizeLimit::Infinite)
 								.map_err(|err| IoEntityError::Read(err.to_string())),
-							Err(error) => Err(IoEntityError::Read(
-								String::from("Non parseable date_time ") + value.clone().as_ref() + error.to_string().as_str()))
+							Err(error) => Err(IoEntityError::Read(format!("Non parseable date_time {}, {}", value, error)))
 						},
-					_ => Err(IoEntityError::Read(String::from("Expected type date_time: ") + json.to_string().as_str()))
+					_ => Err(IoEntityError::Read(format!("Expected type date_time: {}", json)))
 				}
 			}),
 			writer: Box::new(|ref value| {
@@ -476,8 +543,12 @@ impl DataBaseManager {
         	let table_desc = try!(TableDescription::from_view(&table_description, &self.type_descriptions));
 			self.tables.insert(
 				table_desc.name.clone(), 
-				Arc::new(Table { description: table_desc, data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(), tx_manager: self.tx_manager.clone() }));
-			//self.table_descriptions.insert(table_desc.name.clone(), table_desc);
+				Arc::new(Table { 
+					description: table_desc, 
+					data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(), 
+					tx_manager: self.tx_manager.clone() 
+				})
+			);
 			Ok(table_description.name.clone())
 		} else {
 			Err("Table with name ".to_string() + table_description.name.as_str() + " already exists.")
