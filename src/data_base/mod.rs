@@ -344,7 +344,7 @@ impl DataBaseManager {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => 
 						encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => Err(IoEntityError::Read(String::from("Expected type String")))
+                    _ => Err(IoEntityError::Read(String::from("Expected type String:") + json.to_string().as_str()))
                 }
             }),
             writer: Box::new(|value: &Vec<u8>| {
@@ -360,7 +360,7 @@ impl DataBaseManager {
                     rustless::json::JsonValue::U64(value) =>
 						encode(&value.clone(), bincode::SizeLimit::Infinite)
 							.map_err(|err| IoEntityError::Read(err.to_string())),
-                    _ => Err(IoEntityError::Read(String::from("Expected type u64")))
+                    _ => Err(IoEntityError::Read(String::from("Expected type u64: ") + json.to_string().as_str()))
                 }
             }),
             writer: Box::new(|ref value| {
@@ -372,11 +372,16 @@ impl DataBaseManager {
 		let i64_type = TypeDescription {
 			name: "i64".to_string(),
 			reader: Box::new(|ref json| {
-				match *json {
+				match json.clone().as_i64() {
+					Some(value) => 
+						encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+					None => Err(IoEntityError::Read(String::from("Expected type i64: ") + json.to_string().as_str()))
+				}
+				/*match *json {
 					&rustless::json::JsonValue::I64(value) => 
 						encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
-					_ => Err(IoEntityError::Read(String::from("Expected type i64")))
-				}
+					_ => Err(IoEntityError::Read(String::from("Expected type i64: ") + json.to_string().as_str()))
+				}*/
 			}),
 			writer: Box::new(|ref value| {
 				let i64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
@@ -397,7 +402,7 @@ impl DataBaseManager {
 							Err(error) => Err(IoEntityError::Read(
 								String::from("Non parseable date ") + value.clone().as_ref() + error.to_string().as_str()))
 						},
-					_ => Err(IoEntityError::Read(String::from("Expected type Date") + date_fmt))
+					_ => Err(IoEntityError::Read(String::from("Expected type date: ") + json.to_string().as_str() + ", format = " + date_fmt))
 				}
 			}),
 			writer: Box::new(|ref value| {
@@ -417,7 +422,7 @@ impl DataBaseManager {
 							Err(error) => Err(IoEntityError::Read(
 								String::from("Non parseable date_time ") + value.clone().as_ref() + error.to_string().as_str()))
 						},
-					_ => Err(IoEntityError::Read(String::from("Expected type date_time ") + json.to_string().as_str()))
+					_ => Err(IoEntityError::Read(String::from("Expected type date_time: ") + json.to_string().as_str()))
 				}
 			}),
 			writer: Box::new(|ref value| {

@@ -113,11 +113,14 @@ impl std::fmt::Display for ClientError {
     }
 }
 
-fn handle_response<'a, F>(client: Client<'a>, handler: F) -> ClientResult<'a>
-        where F: Fn(&Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
-    match handler(&client) {
+fn handle_response<'a, F>(mut client: Client<'a>, handler: F) -> ClientResult<'a>
+        where F: Fn(&mut Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
+    match handler(&mut client) {
         Ok(res) => client.json(&res),
-        Err(error) => client.error(error) //rustless::ErrorResponse{ error: Box::new(error), response: None })
+        Err(error) => {
+            client.internal_server_error();
+            client.error(error)
+        } //rustless::ErrorResponse{ error: Box::new(error), response: None })
     }
 }
 
@@ -143,10 +146,10 @@ pub fn mount_api() {
 
         api.mount(Api::build(|cache_api| {
 
-            cache_api.after(|client, _params| {
+            /*cache_api.after(|client, _params| {
                 client.set_status(iron::status::Status::NotFound);
                 Ok(())
-            });
+            });*/
 
             cache_api.get("info", |endpoint| {
                 endpoint.handle(|client, _| {
@@ -241,8 +244,8 @@ pub fn mount_api() {
                     params.req_typed("tx_id", json_dsl::i64())
                 });
 
-                endpoint.handle(|client, params| {
-                    handle_response(client, |client| {
+                endpoint.handle(|mut client, params| {
+                    handle_response(client, |mut client| {
                         info!("get entity from table {}", params);
                         let table_name = try!(
                             params.find("table_name")
@@ -272,6 +275,7 @@ pub fn mount_api() {
                                         match value {
                                             Some(value) => Ok(value),
                                             None => {
+                                                client.not_found();
                                                 Ok(JsonValue::String("Entity with key ".to_string() +
                                                                  key.to_string().as_str() +
                                                                 " not found"))
@@ -291,28 +295,17 @@ pub fn mount_api() {
                 meta_ns.post("table", |endpoint| {
                     endpoint.desc("Update description");
                     endpoint.params(|params| {
-                        params.req("data", |data| {
-                            data.desc("Data of cache structure");
-                            data.schema(|cache_desc| {
-                                cache_desc.object();
-                                cache_desc.properties(|props| {
-                                    props.insert("name", |name| {
-                                        name.string();
-                                    });
-                                    props.insert("key", |key| {
-                                        key.object();
-                                    });
-                                });
-                            })
-                        })
+                        params.req_typed("name", json_dsl::string());
+                        params.req_typed("key", json_dsl::object());
+                        params.req_typed("value", json_dsl::object())
                     });
 
                     endpoint.handle(|mut client, params| {
                         handle_response(client, |client| {
                             info!("Table update");
-                            let cache_desc = try!(params.find("data")
-                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("data param not found")]))));
-                            let table_desc = try!(TableDescriptionView::from_json(cache_desc)
+                            //let cache_desc = try!(params.find("data")
+                            //    .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("data param not found")]))));
+                            let table_desc = try!(TableDescriptionView::from_json(params)
                                 .map_err(|error| ClientError::from_display(&error)));
                             match client.app.get_data_base_manager().add_table(table_desc) {
                                 Ok(name) => {
