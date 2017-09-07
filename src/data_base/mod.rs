@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
 use std::sync::{Mutex, MutexGuard, Condvar};
+use std::collections::HashMap;
 
 use concurrent_hashmap::*;
 
@@ -232,6 +233,7 @@ impl Table {
 		self.data.insert(key, Arc::new(Mutex::new(value)))
 	}
 
+
 	fn get(&self, key_entity: &Entity) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		match self.data.find(&key_entity) {
 			Some(data) => {
@@ -266,7 +268,9 @@ impl Table {
 					Table::entity_to_json(key_entity, &self.description.key).unwrap());
 				match self.data.find_mut(key_entity) {
 					Some(mut accessor) => {
-						match Table::get_lock_type(accessor.get().clone()) {
+						let lock_type = Table::get_lock_type(accessor.get().clone());
+						debug!("Lock type = {:?}", lock_type);
+						match lock_type {
 							LockType::Read => {
 								let locked_value = TransactionManager::lock_value(
 									tx_id, 
@@ -306,7 +310,7 @@ impl Table {
 				debug!("In tx {} found value {} by key {}", tx_id,
 					Table::entity_to_json(&value.value, &self.description.value).unwrap(),
 					Table::entity_to_json(key_entity, &self.description.key).unwrap()
-					);
+				);
 				Ok(Some(value.value.clone()))
 			},
 			None => {
@@ -332,7 +336,7 @@ impl Table {
 						);
 						let mut new_key_entity = key_entity.clone();
 						new_key_entity.lock.tx_id = tx_id.clone();
-						locked_transaction.add_entity(self, key_entity.clone(), None, inserted_value.lock().unwrap().clone());
+						locked_transaction.add_entity(self, /*key_entity.clone()*/new_key_entity, None, inserted_value.lock().unwrap().clone());
 						debug!("Return ok for get_lock_for_put");
 						Ok(None)
 					}
@@ -341,6 +345,78 @@ impl Table {
 		}
 	}
 
+	fn tx_get_list_entities(
+			&self,
+			tx_id: &u32,
+			start: u32,
+			count: u32) -> Result<HashMap<Entity, Entity>, PersistenceError> {
+		let res = self.data.iter()
+			.skip(start as usize)
+			.take(count as usize)
+			.map(|(key, value)| {
+				self.get_lock_for_get(tx_id, key)
+					.map(|locked_value| (key.clone(), locked_value.unwrap_or(value.lock().unwrap().clone())))
+			})
+			.map(|r| match r {
+				Ok(entry) => Some(entry),
+				Err(err) => None
+			}).filter_map(|r| r);
+			
+		Ok(res.collect::<HashMap<Entity, Entity>>())
+	}
+
+	pub fn tx_get_list(
+			&self,
+			tx_id: &u32,
+			start: u32,
+			count: u32) -> Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> {
+		let entities_map: HashMap<Entity, Entity> = try!(self.tx_get_list_entities(tx_id, start, count));
+		let res: Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> = entities_map.iter()
+			.map(|(key, value)| { 
+				Table::entity_to_json(key, &self.description.key)
+					.and_then(|key_json| 
+						Table::entity_to_json(value, &self.description.value)
+							.map(|value_json| (key_json, value_json))
+					)
+			})
+			.collect::<Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, IoEntityError>>()
+			.map_err(|error| PersistenceError::IoEntity(error));
+		res
+
+		/*res.map(|entities_list: Vec<&(rustless::json::JsonValue, rustless::json::JsonValue)>| 
+			entities_list.iter()
+				.map(|v| *v)
+				.collect::<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>>())*/
+	}
+	
+	fn tx_get_entity(
+			&self,
+			tx_id: &u32,
+			key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
+		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, key_entity));
+		match locked_value {
+			Some(value) => {
+				debug!("In current tx found value = {} by key = {}", 
+					Table::entity_to_json(&value, &self.description.value).unwrap(),
+					Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				Ok(Some(value))
+			},
+			None => {
+				debug!("In current tx not found value for key = {}", 
+					Table::entity_to_json(key_entity, &self.description.key).unwrap());
+				Ok(self.data.find(key_entity).map(|data| data.get().lock().unwrap().clone()))
+				/*match self.data.find(key_entity) {
+					Some(data) => {
+						&data.get().lock().unwrap().clone()
+						.map(|value_entity| Some(value_entity))
+						.map_err(|err| PersistenceError::IoEntity(err))
+					},
+					None => Ok(None)
+				}*/
+			}
+		}
+	}
+	
 	pub fn tx_get(
 			&self, 
 			tx_id: &u32, 
@@ -350,22 +426,12 @@ impl Table {
 			Table::json_to_entity(key, &self.description.key)
 			.map_err(|err| PersistenceError::IoEntity(err))
 		);
-		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, &key_entity));
-		match locked_value {
-			Some(value) => {
-				debug!("In current tx found value = {} by key = {}", 
-					Table::entity_to_json(&value, &self.description.value).unwrap(),
-					Table::entity_to_json(&key_entity, &self.description.key).unwrap());
-				Table::entity_to_json(&value, &self.description.value)
+		let value_entity = try!(self.tx_get_entity(tx_id, &key_entity));
+		value_entity.map(|value_entity| 
+			Table::entity_to_json(&value_entity, &self.description.value)
 					.map(|r| Some(r))
-					.map_err(|err| PersistenceError::IoEntity(err))
-			},
-			None => {
-				debug!("In current tx not found value for key = {}", 
-					Table::entity_to_json(&key_entity, &self.description.key).unwrap());
-				self.get(&key_entity)
-			}
-		}
+					.map_err(|err| PersistenceError::IoEntity(err)))
+			.unwrap_or(Ok(None))
 	}
 
 	fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {
@@ -572,6 +638,15 @@ impl DataBaseManager {
 			key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
 		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
 		table.get().tx_get(tx_id, key)
+	}
+	
+	pub fn get_list(&self,
+			tx_id: &u32,
+			table_name: &String,
+			start: u32,
+			count: u32) -> Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> {
+		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
+		table.get().tx_get_list(tx_id, start, count)
 	}
 	
 	pub fn tx_start(&self) -> Result<u32, PersistenceError> {

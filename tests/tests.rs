@@ -8,12 +8,31 @@ extern crate log4rs;
 extern crate nimdg;
 extern crate rustless;
 
+extern crate serde;
+extern crate serde_json;
+
+#[macro_use]
+extern crate serde_derive;
+
+use serde_json::Error;
+
 use nimdg::data_base::DataBaseManager;
 use rustless::json::JsonValue;
 use std::str::FromStr;
 use nimdg::data_base::meta::TableDescriptionView;
 
 mod data_base_test;
+
+#[derive(Serialize, Deserialize)]
+struct IdKey {
+    id: u64
+}
+
+#[derive(Serialize, Deserialize)]
+struct Client {
+    full_name: String,
+    age: u64
+}
 
 fn create_test_data_base() -> DataBaseManager {
     let client_table_name: String = String::from("Client");
@@ -42,6 +61,10 @@ fn create_test_data_base() -> DataBaseManager {
     info!("Added table {}", data_base_manager.get_table_json(&client_table_name).unwrap());
 
     data_base_manager
+}
+
+fn fill_test_data_base(data_base_manager: &DataBaseManager) {
+
 }
 
 #[test]
@@ -176,4 +199,34 @@ fn date_test() {
         Err(error) => info!("Error ={}", error)
     }
 
+}
+
+#[test]
+fn get_list_test() {
+    log4rs::init_file("config/log4rs.yml", Default::default());
+
+    let client_table_name: String = String::from("Client");
+    let data_base_manager = create_test_data_base();
+
+    let tx_id = data_base_manager.tx_start().map_err(|err| println!("Tx start error = {}", err)).unwrap();
+    for i in 1..100 {
+        let key = IdKey { id: i };
+        let value = Client {
+            full_name: String::from(format!("TestName{}", i)),
+            age: 25 + i
+        };
+        
+        let key_json = serde_json::to_value(key);
+        let value_json = serde_json::to_value(value);
+        data_base_manager.add_data(&tx_id, &client_table_name, &key_json, &value_json);
+    }
+    data_base_manager.tx_stop(&tx_id).map_err(|err| println!("Tx commit error = {}", err)).unwrap();
+
+    let tx_id2 = data_base_manager.tx_start().map_err(|err| println!("Tx start error = {}", err)).unwrap();
+    let list_5 = data_base_manager.get_list(&tx_id2, &client_table_name, 0, 5).map_err(|err| println!("Failed get list = {}", err)).unwrap();
+    println!("Found {} of 0 to 5 elements", list_5.len());
+    for (key, value) in list_5 {
+        println!("  05:{} -> {}", key, value);
+    }
+    data_base_manager.tx_stop(&tx_id2).map_err(|err| println!("Tx commit error = {}", err)).unwrap();
 }
