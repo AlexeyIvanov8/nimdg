@@ -1,5 +1,4 @@
-
-#![feature(rustc_private)]
+#![feature(rustc_private, pub_restricted, field_init_shorthand)]
 #[macro_use]
 extern crate log;
 //extern crate env_logger;
@@ -222,11 +221,16 @@ fn get_list_test() {
     }
     data_base_manager.tx_stop(&tx_id).map_err(|err| println!("Tx commit error = {}", err)).unwrap();
 
+    get_and_print_list_entities(&data_base_manager, &client_table_name);
+    get_and_print_list_entities(&data_base_manager, &client_table_name);
+}
+
+fn get_and_print_list_entities(data_base_manager: &DataBaseManager, client_table_name: &String) {
     let tx_id2 = data_base_manager.tx_start().map_err(|err| println!("Tx start error = {}", err)).unwrap();
-    let list_5 = data_base_manager.get_list(&tx_id2, &client_table_name, 0, 5).map_err(|err| println!("Failed get list = {}", err)).unwrap();
-    println!("Found {} of 0 to 5 elements", list_5.len());
+    let list_5 = data_base_manager.get_list(&tx_id2, client_table_name, 0, 5).map_err(|err| println!("Failed get list = {}", err)).unwrap();
+    info!("Found {} of 0 to 5 elements", list_5.len());
     for (key, value) in list_5 {
-        println!("  05:{} -> {}", key, value);
+        info!("  05:{} -> {}", key, value);
     }
     data_base_manager.tx_stop(&tx_id2).map_err(|err| println!("Tx commit error = {}", err)).unwrap();
 }

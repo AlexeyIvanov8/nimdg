@@ -15,6 +15,7 @@ serde_derive = "0.8"
 log = "*"
 log4rs = "0.7.0"
 chrono = { version = "0.4", features = ["serde"] }
+chashmap = "2.2.0"
 
 [dependencies.concurrent-hashmap]
 version = "0.2.1"

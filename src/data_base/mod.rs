@@ -27,7 +27,7 @@ pub mod meta;
 pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
-use data_base::transaction::{TransactionManager, Lock, LockType, LockedValue};
+use data_base::transaction::{Transaction, TransactionManager, Lock, LockType, LockedValue};
 
 use self::chrono::prelude::*;
 use std::str::FromStr;
@@ -251,7 +251,7 @@ impl Table {
 		locked_value_unwrap.clone()
 	}
 
-	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
+	fn get_lock_for_get(&self, tx_id: &u32, key_entity: &Entity, value_entity: Option<Arc<Mutex<Entity>>>) -> Result<Option<Entity>, PersistenceError> {
 		let transaction = try!(self.tx_manager.get_tx(tx_id));
 		let locked_transaction = transaction.lock().unwrap();
 		let value_accessor = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
@@ -266,28 +266,57 @@ impl Table {
 				debug!(
 					"Entity with key = {} not locked yet", 
 					Table::entity_to_json(key_entity, &self.description.key).unwrap());
-				match self.data.find_mut(key_entity) {
-					Some(mut accessor) => {
-						let lock_type = Table::get_lock_type(accessor.get().clone());
-						debug!("Lock type = {:?}", lock_type);
-						match lock_type {
-							LockType::Read => {
-								let locked_value = TransactionManager::lock_value(
-									tx_id, 
-									self, 
-									&locked_transaction, 
-									key_entity, 
-									Some(accessor.get().clone())
-								);
-								Ok(locked_value)
-							},
-							LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
-						}
+				match value_entity {
+					Some(value_entity) => {
+						let locked_value = self.lock_value(tx_id, &locked_transaction, key_entity, value_entity);
+						Ok(locked_value)
 					},
-					None => Ok(None) //Err(PersistenceError::EntityNotFound(key_entity.clone()))
+					None => {
+						match self.data.find_mut(key_entity) {
+							Some(mut accessor) => {
+								Ok(self.lock_value(tx_id, &locked_transaction, key_entity, accessor.get().clone()))
+
+								/*let lock_type = Table::get_lock_type(accessor.get().clone());
+								debug!("Lock type = {:?}", lock_type);
+								match lock_type {
+									LockType::Read => {
+										let locked_value = TransactionManager::lock_value(
+											tx_id, 
+											self, 
+											&locked_transaction, 
+											key_entity, 
+											Some(accessor.get().clone())
+										);
+										Ok(locked_value)
+									},
+									LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
+								}*/
+							},
+							None => { 
+								debug!("Not found value by key {:?} in table {}", Table::entity_to_json(key_entity, &self.description.key), self.description.name);
+								Ok(None) 
+							}
+						}
+					}
 				}
 			}
 		} 
+	}
+
+	fn lock_value(&self, tx_id: &u32, locked_transaction: &Transaction, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Option<Entity> {
+		let lock_type = Table::get_lock_type(value_entity.clone());
+								debug!("Lock type = {:?}", lock_type);
+								match lock_type {
+									LockType::Read => {
+										TransactionManager::lock_value(
+											tx_id, 
+											self, 
+											&locked_transaction, 
+											key_entity, 
+											Some(value_entity))
+									},
+									LockType::Write => Some(value_entity.lock().unwrap().clone())
+								}
 	}
 
 	fn get_lock_type(entity: Arc<Mutex<Entity>>) -> LockType {
@@ -350,12 +379,19 @@ impl Table {
 			tx_id: &u32,
 			start: u32,
 			count: u32) -> Result<HashMap<Entity, Entity>, PersistenceError> {
+		/*for (key, value) in self.data.iter() {
+			debug!("{}: {:?} -> {:?}", self.description.name,
+				Table::entity_to_json(key, &self.description.key),
+				Table::entity_to_json(&value.lock().unwrap(), &self.description.value))
+		};*/
+
 		let res = self.data.iter()
 			.skip(start as usize)
 			.take(count as usize)
 			.map(|(key, value)| {
-				self.get_lock_for_get(tx_id, key)
-					.map(|locked_value| (key.clone(), locked_value.unwrap_or(value.lock().unwrap().clone())))
+				self.get_lock_for_get(tx_id, key, Some(value.clone()))
+					.and_then(|entity: Option<Entity>| entity.ok_or(PersistenceError::EntityNotFound(key.clone())))
+					.map(|locked_value| (key.clone(), locked_value))
 			})
 			.map(|r| match r {
 				Ok(entry) => Some(entry),
@@ -393,7 +429,7 @@ impl Table {
 			&self,
 			tx_id: &u32,
 			key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
-		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, key_entity));
+		let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, key_entity, None));
 		match locked_value {
 			Some(value) => {
 				debug!("In current tx found value = {} by key = {}", 

@@ -194,7 +194,7 @@ impl TransactionManager {
 						None => {
 							let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
 							table.raw_put(locked_key.key.clone(), locked_value.value.clone());
-							debug!("Put new value in table in tx {}, lock = {:?}", id, locked_value.value.lock);
+							//debug!("Put new value in table in tx {}, lock = {:?}", id, locked_value.value.lock);
 						}
 					}
 				};
@@ -247,7 +247,7 @@ impl TransactionManager {
 				}
 			},
 			None => {
-				debug!("Not found referense for unlock key = {:?}", locked_key);
+				//debug!("Not found referense for unlock key = {:?}", locked_key);
 				//let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
 				//table.raw_put(locked_key.key.clone(), locked_value.value.clone());
 				Ok(())

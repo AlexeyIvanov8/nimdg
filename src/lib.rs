@@ -1,7 +1,6 @@
-
-
+#![feature(rustc_private, pub_restricted, field_init_shorthand)]
 #![crate_name="nimdg"]
-#![feature(rustc_private)]
+
 #[macro_use]
 extern crate log;
 //extern crate env_logger;
