@@ -192,8 +192,10 @@ impl ToJson for TableDescription {
 
 impl TableDescription {
     pub fn from_view(view: &TableDescriptionView, type_descs: &BTreeMap<String, Arc<Box<TypeDescription>>>) -> Result<TableDescription, String> {
-        let key_desc = try!(EntityDescription::from_view(&view.key, type_descs));
-        let value_desc = try!(EntityDescription::from_view(&view.value, type_descs));
+        let key_desc = try!(EntityDescription::from_view(&view.key, type_descs)
+			.map_err(|error| format!("Cannot read key description: {}", error)));
+        let value_desc = try!(EntityDescription::from_view(&view.value, type_descs)
+			.map_err(|error| format!("Cannot read value description: {}", error)));
         Ok(TableDescription { 
             name: view.name.clone(),
             key: key_desc,

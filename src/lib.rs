@@ -118,7 +118,8 @@ fn handle_response<'a, F>(mut client: Client<'a>, handler: F) -> ClientResult<'a
         Ok(res) => client.json(&res),
         Err(error) => {
             client.internal_server_error();
-            client.error(error)
+            client.json(&JsonValue::String(error.description))
+           // client.error(error)
         } //rustless::ErrorResponse{ error: Box::new(error), response: None })
     }
 }
