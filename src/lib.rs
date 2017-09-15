@@ -314,7 +314,7 @@ pub fn mount_api() {
                                 }
                                 Err(message) => {
                                     //client.set_status(rustless::server::status::StatusCode::BadRequest);
-                                    Ok(JsonValue::String(message))
+                                    Err(ClientError::new(ClientErrorType::CommonError(message)))
                                 }
                             }
                         })
