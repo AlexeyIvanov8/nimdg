@@ -236,7 +236,7 @@ pub fn mount_api() {
                 })
             });
 
-            cache_api.get("get/:table_name", |endpoint| {
+            cache_api.get("get/:table_name/:tx_id/:key", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
                     params.req("key", |_| {});
