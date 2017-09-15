@@ -112,6 +112,10 @@ impl std::fmt::Display for ClientError {
     }
 }
 
+macro_rules! client_error {
+    ($message:expr) => (ClientError::new(ClientErrorType::CommonError( format!("Error: {}", $message) )))
+}
+
 fn handle_response<'a, F>(mut client: Client<'a>, handler: F) -> ClientResult<'a>
         where F: Fn(&mut Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
     match handler(&mut client) {
@@ -190,7 +194,7 @@ pub fn mount_api() {
                             let db_manager = client.app.get_data_base_manager();
                             match db_manager.tx_stop(&tx_id) {
                                 Ok(()) => Ok(JsonValue::String(String::from("done"))),
-                                Err(error) => Ok(JsonValue::String(error.to_string()))
+                                Err(error) => Err(ClientError::new(ClientErrorType::CommonError(error.to_string())))
                             }
                         })
                     })
@@ -221,17 +225,15 @@ pub fn mount_api() {
                                         .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
                                 );
 
-                                let res = db_manager.add_data(
+                                db_manager.add_data(
                                                             &tx_id,
                                                             &String::from(table_name),
                                                             &key,
-                                                            &value);
-                                match res {
-                                    Ok(_) => Ok(JsonValue::String("Done".to_string())),
-                                    Err(err) => Ok(JsonValue::String(err.to_string())),
-                                }
-                            }
-                            Err(message) => Ok(JsonValue::String(message)),
+                                                            &value)
+                                    .map(|_| JsonValue::String("Done".to_string()))
+                                    .map_err(|error| ClientError::new(ClientErrorType::CommonError(error.to_string())))
+                            },
+                            Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message)))
                         }
                     })
                 })
@@ -282,10 +284,10 @@ pub fn mount_api() {
                                             }
                                         }
                                     }
-                                    Err(message) => Ok(JsonValue::String(message.to_string())),
+                                    Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message.to_string()))),
                                 }
                             }
-                            Err(message) => Ok(JsonValue::String(message.to_string())),
+                            Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message.to_string()))),
                         }
                     })
                 })
@@ -326,23 +328,24 @@ pub fn mount_api() {
                     endpoint.params(|params| params.req_typed("name", json_dsl::string()));
 
                     endpoint.handle(|client, params| {
-                        match params.find("name")
-                            .and_then(|name| name.as_str()) {
-                            Some(name) => {
-                                info!("Table with name {}", name);
-                                let table_desc = client.app
-                                    .get_data_base_manager()
-                                    .get_table_json(&String::from(name));
-                                match table_desc {
-                                    Some(table_desc) => client.json(&table_desc),
-                                    None => {
-                                        client.text(String::from("Table ".to_string() + name +
-                                                                 " not found"))
+                        handle_response(client, |client| {
+                            match params.find("name")
+                                .and_then(|name| name.as_str()) {
+                                Some(name) => {
+                                    info!("Table with name {}", name);
+                                    let table_desc = client.app
+                                        .get_data_base_manager()
+                                        .get_table_json(&String::from(name));
+                                    match table_desc {
+                                        Some(table_desc) => Ok(table_desc),
+                                        None => {
+                                            Err(client_error!(format!("Table {} not found", name)))
+                                        }
                                     }
                                 }
+                                None => Err(client_error!("Parameter table name not found."))
                             }
-                            None => client.text("Parameter table name not found.".to_string()),
-                        }
+                        })
                     })
                 });
             });
