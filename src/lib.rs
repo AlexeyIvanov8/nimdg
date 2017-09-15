@@ -194,7 +194,7 @@ pub fn mount_api() {
                             let db_manager = client.app.get_data_base_manager();
                             match db_manager.tx_stop(&tx_id) {
                                 Ok(()) => Ok(JsonValue::String(String::from("done"))),
-                                Err(error) => Err(ClientError::new(ClientErrorType::CommonError(error.to_string())))
+                                Err(error) => Err(client_error!(error.to_string()))
                             }
                         })
                     })
@@ -231,9 +231,9 @@ pub fn mount_api() {
                                                             &key,
                                                             &value)
                                     .map(|_| JsonValue::String("Done".to_string()))
-                                    .map_err(|error| ClientError::new(ClientErrorType::CommonError(error.to_string())))
+                                    .map_err(|error| client_error!(error.to_string()))
                             },
-                            Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message)))
+                            Err(message) => Err(client_error!(message))
                         }
                     })
                 })
@@ -278,16 +278,14 @@ pub fn mount_api() {
                                             Some(value) => Ok(value),
                                             None => {
                                                 client.not_found();
-                                                Ok(JsonValue::String("Entity with key ".to_string() +
-                                                                 key.to_string().as_str() +
-                                                                " not found"))
+                                                Ok(JsonValue::String(format!("Entity with key {} not found", key)))
                                             }
                                         }
                                     }
-                                    Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message.to_string()))),
+                                    Err(message) => Err(client_error!(message.to_string())),
                                 }
                             }
-                            Err(message) => Err(ClientError::new(ClientErrorType::CommonError(message.to_string()))),
+                            Err(message) => Err(client_error!(message.to_string())),
                         }
                     })
                 })
@@ -312,12 +310,11 @@ pub fn mount_api() {
                             match client.app.get_data_base_manager().add_table(table_desc) {
                                 Ok(name) => {
                                     //client.set_status(rustless::server::status::StatusCode::Ok);
-                                    Ok(JsonValue::String("Table with name ".to_string() + name.as_str() +
-                                                " succefully added"))
+                                    Ok(JsonValue::String(format!("Table with name {} succefully added", name)))
                                 }
                                 Err(message) => {
                                     //client.set_status(rustless::server::status::StatusCode::BadRequest);
-                                    Err(ClientError::new(ClientErrorType::CommonError(message)))
+                                    Err(client_error!(message))
                                 }
                             }
                         })
