@@ -34,28 +34,6 @@ pub mod data_base;
 use self::data_base::app_extension::DataBaseExtension;
 use self::data_base::meta::{EntityDescriptionView, TableDescriptionView};
 
-// reading views from rustless json
-/*fn read_entity_description_view(json: &BTreeMap<String, rustless::json::JsonValue>)
-                                -> EntityDescriptionView {
-    let fields_object = json.get("fields").unwrap().as_object().unwrap();
-    let fields =
-        fields_object.iter().map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap()))).collect();
-    // for (k, v) in fields { println!("Field {} = {}", k, v) };
-    EntityDescriptionView { fields: fields }
-}
-
-fn read_table_description_view(json: &rustless::json::JsonValue) -> TableDescriptionView {
-    let name = json.find("name").unwrap().as_str().unwrap();
-    println!("Found cache desc with name = {}", name);
-    let key = read_entity_description_view(json.find("key").unwrap().as_object().unwrap());
-    let value = read_entity_description_view(json.find("value").unwrap().as_object().unwrap());
-    TableDescriptionView {
-        name: String::from(name),
-        key: key,
-        value: value,
-    }
-}*/
-
 fn run_data_base_manager(app: &mut rustless::Application) {
     let data_base_manager = data_base::DataBaseManager::new();
     app.ext.insert::<data_base::app_extension::AppDataBase>(data_base_manager.unwrap());
@@ -135,6 +113,12 @@ fn get_key_and_value(params: &rustless::json::JsonValue)
     let key = try!(data.get("key").ok_or("Attribute key not found"));
     let value = try!(data.get("value").ok_or("Attribute value not found"));
     Ok((&key, &value))
+}
+
+fn get_parameter<'s, T>(name: &str, params: &'s JsonValue, mapping: &Fn(&'s JsonValue) -> Option<T>) -> Result<T, ClientError> {
+    params.find(name)
+        .and_then(|value| mapping(value))
+        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from(name)])))
 }
 
 pub fn mount_api() {
@@ -242,7 +226,7 @@ pub fn mount_api() {
             cache_api.get("get/:table_name/:tx_id/:key", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
-                    params.req("key", |_| {});
+                    params.req_typed("key", json_dsl::object());
                     params.req_typed("tx_id", json_dsl::i64())
                 });
 
@@ -257,8 +241,9 @@ pub fn mount_api() {
 
                         let key = try!(
                             params.find("key")
-                                .and_then(|key| key.as_str())
-                                .map(|key| rustless::json::JsonValue::from_str(key))
+                                .and_then(|key| key.as_object())
+                                .map(|key| rustless::json::JsonValue::Object(key.clone()))
+                                //.map(|key| rustless::json::JsonValue::from_str(key))
                                 .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("key")])))
                         );
 
@@ -268,25 +253,47 @@ pub fn mount_api() {
                                 .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
                         );
 
-                        match key {
-                            Ok(key) => {
-                                let db_manager = client.app.get_data_base_manager();
-                                let value = db_manager.get_data(&tx_id, &String::from(table_name), &key);
+                        let db_manager = client.app.get_data_base_manager();
+                        let value = db_manager.get_data(&tx_id, &String::from(table_name), &key);
+                        match value {
+                            Ok(value) => {
                                 match value {
-                                    Ok(value) => {
-                                        match value {
-                                            Some(value) => Ok(value),
-                                            None => {
-                                                client.not_found();
-                                                Ok(JsonValue::String(format!("Entity with key {} not found", key)))
-                                            }
-                                        }
+                                    Some(value) => Ok(value),
+                                    None => {
+                                        client.not_found();
+                                        Ok(JsonValue::String(format!("Entity with key {} not found", key)))
                                     }
-                                    Err(message) => Err(client_error!(message.to_string())),
                                 }
                             }
                             Err(message) => Err(client_error!(message.to_string())),
                         }
+                    })
+                })
+            });
+
+            cache_api.get("get/:table_name/:tx_id/:start/:count", |endpoint| {
+                endpoint.params(|params| {
+                    params.req_typed("table_name", json_dsl::string());
+                    params.req_typed("tx_id", json_dsl::u64());
+                    params.req_typed("start", json_dsl::u64());
+                    params.req_typed("count", json_dsl::u64())
+                });
+
+                endpoint.handle(|mut client, params| {
+                    handle_response(client, |mut client| {
+                        debug!("Get list entities from table {}", params);
+                        let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
+                        let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64));
+                        let start = try!(get_parameter("start", params, &rustless::json::JsonValue::as_u64));
+                        let count = try!(get_parameter("count", params, &rustless::json::JsonValue::as_u64));
+                        let db_manager = client.app.get_data_base_manager();
+                        
+                        let data_list = db_manager.get_list(tx_id as u32, &String::from(table_name), start as u32, count as u32);
+                        data_list
+                            .map(|data_list| rustless::json::JsonValue::Array(data_list))
+                            .map_err(|error| client_error!(error))
+                        
+                        //Ok(rustless::json::JsonValue::String(String::from("rff")))
                     })
                 })
             });

@@ -376,7 +376,7 @@ impl Table {
 
 	fn tx_get_list_entities(
 			&self,
-			tx_id: &u32,
+			tx_id: u32,
 			start: u32,
 			count: u32) -> Result<HashMap<Entity, Entity>, PersistenceError> {
 		/*for (key, value) in self.data.iter() {
@@ -389,7 +389,7 @@ impl Table {
 			.skip(start as usize)
 			.take(count as usize)
 			.map(|(key, value)| {
-				self.get_lock_for_get(tx_id, key, Some(value.clone()))
+				self.get_lock_for_get(&tx_id, key, Some(value.clone()))
 					.and_then(|entity: Option<Entity>| entity.ok_or(PersistenceError::EntityNotFound(key.clone())))
 					.map(|locked_value| (key.clone(), locked_value))
 			})
@@ -403,26 +403,22 @@ impl Table {
 
 	pub fn tx_get_list(
 			&self,
-			tx_id: &u32,
+			tx_id: u32,
 			start: u32,
-			count: u32) -> Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> {
+			count: u32) -> Result<Vec<rustless::json::JsonValue>, PersistenceError> {
 		let entities_map: HashMap<Entity, Entity> = try!(self.tx_get_list_entities(tx_id, start, count));
-		let res: Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> = entities_map.iter()
+		let res: Result<Vec<rustless::json::JsonValue>, PersistenceError> = entities_map.iter()
 			.map(|(key, value)| { 
 				Table::entity_to_json(key, &self.description.key)
 					.and_then(|key_json| 
 						Table::entity_to_json(value, &self.description.value)
-							.map(|value_json| (key_json, value_json))
+							.map(|value_json| rustless::json::JsonValue::Array(vec![key_json, value_json]))
 					)
-			})
-			.collect::<Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, IoEntityError>>()
+				}
+			)
+			.collect::<Result<Vec<rustless::json::JsonValue>, IoEntityError>>()
 			.map_err(|error| PersistenceError::IoEntity(error));
 		res
-
-		/*res.map(|entities_list: Vec<&(rustless::json::JsonValue, rustless::json::JsonValue)>| 
-			entities_list.iter()
-				.map(|v| *v)
-				.collect::<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>>())*/
 	}
 	
 	fn tx_get_entity(
@@ -570,7 +566,8 @@ impl DataBaseManager {
 					    match NaiveDate::parse_from_str(value.clone().as_ref(), date_fmt) {
 							Ok(date) => encode(&date.format(date_fmt).to_string(), bincode::SizeLimit::Infinite)
 								.map_err(|err| IoEntityError::Read(err.to_string())),
-							Err(error) => Err(IoEntityError::Read(format!("Non parseable date {}, {}", value, error)))
+							Err(error) => Err(IoEntityError::Read(
+								format!("Non parseable date {}, {}. Required format: {}", value, error, date_fmt)))
 						},
 					_ => Err(IoEntityError::Read(format!("Expected type date: {}, format = {}", json, date_fmt)))
 				}
@@ -677,10 +674,10 @@ impl DataBaseManager {
 	}
 	
 	pub fn get_list(&self,
-			tx_id: &u32,
+			tx_id: u32,
 			table_name: &String,
 			start: u32,
-			count: u32) -> Result<Vec<(rustless::json::JsonValue, rustless::json::JsonValue)>, PersistenceError> {
+			count: u32) -> Result<Vec<rustless::json::JsonValue>, PersistenceError> {
 		let table = try!(self.tables.find(table_name).ok_or(PersistenceError::TableNotFound(table_name.clone())));
 		table.get().tx_get_list(tx_id, start, count)
 	}
