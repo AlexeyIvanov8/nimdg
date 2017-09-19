@@ -39,13 +39,6 @@ fn run_data_base_manager(app: &mut rustless::Application) {
     app.ext.insert::<data_base::app_extension::AppDataBase>(data_base_manager.unwrap());
 }
 
-#[derive(RustcDecodable, RustcEncodable)]
-pub struct TestStruct {
-    data_int: u8,
-    data_str: String,
-    data_vector: Vec<u8>,
-}
-
 // For show errors on client side
 #[derive(Debug, Clone)]
 enum ClientErrorType {
@@ -133,11 +126,6 @@ pub fn mount_api() {
         api.mount(swagger::create_api("api-docs"));
 
         api.mount(Api::build(|cache_api| {
-
-            /*cache_api.after(|client, _params| {
-                client.set_status(iron::status::Status::NotFound);
-                Ok(())
-            });*/
 
             cache_api.get("info", |endpoint| {
                 endpoint.handle(|client, _| {
@@ -233,7 +221,12 @@ pub fn mount_api() {
                 endpoint.handle(|mut client, params| {
                     handle_response(client, |mut client| {
                         info!("get entity from table {}", params);
-                        let table_name = try!(
+						let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
+						let key = try!(get_parameter("key", params, &rustless::json::JsonValue::as_object)
+										.map(|key| rustless::json::JsonValue::Object(key.clone)));
+						let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
+						
+                        /*let table_name = try!(
                             params.find("table_name")
                                 .and_then(|table_name| table_name.as_str())
                                 .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
@@ -243,7 +236,6 @@ pub fn mount_api() {
                             params.find("key")
                                 .and_then(|key| key.as_object())
                                 .map(|key| rustless::json::JsonValue::Object(key.clone()))
-                                //.map(|key| rustless::json::JsonValue::from_str(key))
                                 .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("key")])))
                         );
 
@@ -251,7 +243,7 @@ pub fn mount_api() {
                             params.find("tx_id")
                                 .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
                                 .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
-                        );
+                        );*/
 
                         let db_manager = client.app.get_data_base_manager();
                         let value = db_manager.get_data(&tx_id, &String::from(table_name), &key);
@@ -310,17 +302,13 @@ pub fn mount_api() {
                     endpoint.handle(|mut client, params| {
                         handle_response(client, |client| {
                             info!("Table update");
-                            //let cache_desc = try!(params.find("data")
-                            //    .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("data param not found")]))));
                             let table_desc = try!(TableDescriptionView::from_json(params)
                                 .map_err(|error| ClientError::from_display(&error)));
                             match client.app.get_data_base_manager().add_table(table_desc) {
                                 Ok(name) => {
-                                    //client.set_status(rustless::server::status::StatusCode::Ok);
                                     Ok(JsonValue::String(format!("Table with name {} succefully added", name)))
                                 }
                                 Err(message) => {
-                                    //client.set_status(rustless::server::status::StatusCode::BadRequest);
                                     Err(client_error!(message))
                                 }
                             }
