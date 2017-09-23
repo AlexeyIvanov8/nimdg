@@ -1,5 +1,3 @@
 
 #[test]
-fn data_base_test() {
-    
-}
+fn data_base_test() {}

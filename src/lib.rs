@@ -3,7 +3,7 @@
 
 #[macro_use]
 extern crate log;
-//extern crate env_logger;
+// extern crate env_logger;
 extern crate log4rs;
 
 extern crate rustc_serialize;
@@ -43,30 +43,39 @@ fn run_data_base_manager(app: &mut rustless::Application) {
 #[derive(Debug, Clone)]
 enum ClientErrorType {
     GettingParamsError(Vec<String>),
-    CommonError(String)
+    CommonError(String),
 }
 
 #[derive(Debug)]
 struct ClientError {
     error_type: ClientErrorType,
-    description: String
+    description: String,
 }
 
 impl ClientError {
     fn new(error_type: ClientErrorType) -> ClientError {
-        ClientError{error_type: error_type.clone(), description: ClientError::get_description(&error_type)}
+        ClientError {
+            error_type: error_type.clone(),
+            description: ClientError::get_description(&error_type),
+        }
     }
 
     fn from_display(display: &Display) -> ClientError {
         let description = format!("{}", display);
-        ClientError { error_type: ClientErrorType::CommonError(description.clone()), description: description.clone() }
+        ClientError {
+            error_type: ClientErrorType::CommonError(description.clone()),
+            description: description.clone(),
+        }
     }
 
     fn get_description(error_type: &ClientErrorType) -> String {
         match *error_type {
-            ClientErrorType::GettingParamsError(ref param_names) => param_names.iter()
-                    .fold(String::from("Getting params error: "), |acc, name| acc + name + ";"),
-            ClientErrorType::CommonError(ref message) => message.clone()
+            ClientErrorType::GettingParamsError(ref param_names) => {
+                param_names.iter()
+                    .fold(String::from("Getting params error: "),
+                          |acc, name| acc + name + ";")
+            }
+            ClientErrorType::CommonError(ref message) => message.clone(),
         }
     }
 }
@@ -88,21 +97,20 @@ macro_rules! client_error {
 }
 
 fn handle_response<'a, F>(mut client: Client<'a>, handler: F) -> ClientResult<'a>
-        where F: Fn(&mut Client<'a>) -> Result<rustless::json::JsonValue, ClientError> {
+    where F: Fn(&mut Client<'a>) -> Result<rustless::json::JsonValue, ClientError>
+{
     match handler(&mut client) {
         Ok(res) => client.json(&res),
         Err(error) => {
             client.internal_server_error();
             client.json(&JsonValue::String(error.description))
-           // client.error(error)
+            // client.error(error)
         } //rustless::ErrorResponse{ error: Box::new(error), response: None })
     }
 }
 
-fn get_key_and_value(params: &rustless::json::JsonValue)
-     -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
-    let data =
-        try!(params.find("data").and_then(|data| data.as_object()).ok_or("Param data not found"));
+fn get_key_and_value(params: &rustless::json::JsonValue) -> Result<(&rustless::json::JsonValue, &rustless::json::JsonValue), String> {
+    let data = try!(params.find("data").and_then(|data| data.as_object()).ok_or("Param data not found"));
     let key = try!(data.get("key").ok_or("Attribute key not found"));
     let value = try!(data.get("value").ok_or("Attribute value not found"));
     Ok((&key, &value))
@@ -115,7 +123,7 @@ fn get_parameter<'s, T>(name: &str, params: &'s JsonValue, mapping: &Fn(&'s Json
 }
 
 pub fn mount_api() {
-    //env_logger::init().unwrap();
+    // env_logger::init().unwrap();
     log4rs::init_file("config/log4rs.yml", Default::default()).unwrap();
     info!("Hello, world!");
 
@@ -144,29 +152,23 @@ pub fn mount_api() {
                             Ok(tx_id) => {
                                 debug!("Response start tx {}", tx_id);
                                 client.json(&rustless::json::JsonValue::U64(tx_id as u64))
-                            },
-                            Err(error) => client.text(error.to_string())
+                            }
+                            Err(error) => client.text(error.to_string()),
                         }
                     })
                 });
 
                 tx_ns.delete("stop/:tx_id", |endpoint| {
-                    endpoint.params(|params| {
-                        params.req_typed("tx_id", json_dsl::u64())
-                    });
+                    endpoint.params(|params| params.req_typed("tx_id", json_dsl::u64()));
 
                     endpoint.handle(|client, params| {
                         handle_response(client, |client| {
-                            let tx_id = try!(
-                                        params.find("tx_id")
-                                            .and_then(|value| value.as_u64().map(|v| v as u32))
-                                            .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
-                                    );
+                            let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
 
                             let db_manager = client.app.get_data_base_manager();
                             match db_manager.tx_stop(&tx_id) {
                                 Ok(()) => Ok(JsonValue::String(String::from("done"))),
-                                Err(error) => Err(client_error!(error.to_string()))
+                                Err(error) => Err(client_error!(error.to_string())),
                             }
                         })
                     })
@@ -185,27 +187,14 @@ pub fn mount_api() {
                         match get_key_and_value(params) {
                             Ok((key, value)) => {
                                 let db_manager = client.app.get_data_base_manager();
-                                let tx_id = try!(
-                                    params.find("tx_id")
-                                        .and_then(|value| value.as_u64().map(|v| v as u32))
-                                        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
-                                );
+                                let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
+                                let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
 
-                                let table_name = try!(
-                                    params.find("table_name")
-                                        .and_then(|value| value.as_str())
-                                        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
-                                );
-
-                                db_manager.add_data(
-                                                            &tx_id,
-                                                            &String::from(table_name),
-                                                            &key,
-                                                            &value)
+                                db_manager.add_data(&tx_id, &String::from(table_name), &key, &value)
                                     .map(|_| JsonValue::String("Done".to_string()))
                                     .map_err(|error| client_error!(error.to_string()))
-                            },
-                            Err(message) => Err(client_error!(message))
+                            }
+                            Err(message) => Err(client_error!(message)),
                         }
                     })
                 })
@@ -221,29 +210,10 @@ pub fn mount_api() {
                 endpoint.handle(|mut client, params| {
                     handle_response(client, |mut client| {
                         info!("get entity from table {}", params);
-						let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
-						let key = try!(get_parameter("key", params, &rustless::json::JsonValue::as_object)
-										.map(|key| rustless::json::JsonValue::Object(key.clone)));
-						let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
-						
-                        /*let table_name = try!(
-                            params.find("table_name")
-                                .and_then(|table_name| table_name.as_str())
-                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("table_name")])))
-                        );
-
-                        let key = try!(
-                            params.find("key")
-                                .and_then(|key| key.as_object())
-                                .map(|key| rustless::json::JsonValue::Object(key.clone()))
-                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("key")])))
-                        );
-
-                        let tx_id = try!(
-                            params.find("tx_id")
-                                .and_then(|tx_id| tx_id.as_u64().map(|v| v as u32))
-                                .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from("tx_id")])))
-                        );*/
+                        let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
+                        let key = try!(get_parameter("key", params, &rustless::json::JsonValue::as_object)
+                            .map(|key| rustless::json::JsonValue::Object(key.clone())));
+                        let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
 
                         let db_manager = client.app.get_data_base_manager();
                         let value = db_manager.get_data(&tx_id, &String::from(table_name), &key);
@@ -279,13 +249,15 @@ pub fn mount_api() {
                         let start = try!(get_parameter("start", params, &rustless::json::JsonValue::as_u64));
                         let count = try!(get_parameter("count", params, &rustless::json::JsonValue::as_u64));
                         let db_manager = client.app.get_data_base_manager();
-                        
-                        let data_list = db_manager.get_list(tx_id as u32, &String::from(table_name), start as u32, count as u32);
-                        data_list
-                            .map(|data_list| rustless::json::JsonValue::Array(data_list))
+
+                        let data_list = db_manager.get_list(tx_id as u32,
+                                                            &String::from(table_name),
+                                                            start as u32,
+                                                            count as u32);
+                        data_list.map(|data_list| rustless::json::JsonValue::Array(data_list))
                             .map_err(|error| client_error!(error))
-                        
-                        //Ok(rustless::json::JsonValue::String(String::from("rff")))
+
+                        // Ok(rustless::json::JsonValue::String(String::from("rff")))
                     })
                 })
             });
@@ -302,15 +274,10 @@ pub fn mount_api() {
                     endpoint.handle(|mut client, params| {
                         handle_response(client, |client| {
                             info!("Table update");
-                            let table_desc = try!(TableDescriptionView::from_json(params)
-                                .map_err(|error| ClientError::from_display(&error)));
+                            let table_desc = try!(TableDescriptionView::from_json(params).map_err(|error| ClientError::from_display(&error)));
                             match client.app.get_data_base_manager().add_table(table_desc) {
-                                Ok(name) => {
-                                    Ok(JsonValue::String(format!("Table with name {} succefully added", name)))
-                                }
-                                Err(message) => {
-                                    Err(client_error!(message))
-                                }
+                                Ok(name) => Ok(JsonValue::String(format!("Table with name {} succefully added", name))),
+                                Err(message) => Err(client_error!(message)),
                             }
                         })
                     })
@@ -330,12 +297,10 @@ pub fn mount_api() {
                                         .get_table_json(&String::from(name));
                                     match table_desc {
                                         Some(table_desc) => Ok(table_desc),
-                                        None => {
-                                            Err(client_error!(format!("Table {} not found", name)))
-                                        }
+                                        None => Err(client_error!(format!("Table {} not found", name))),
                                     }
                                 }
-                                None => Err(client_error!("Parameter table name not found."))
+                                None => Err(client_error!("Parameter table name not found.")),
                             }
                         })
                     })
@@ -368,6 +333,6 @@ pub fn mount_api() {
                     });
 
     iron::Iron::new(app).http("localhost:4300").unwrap();
-    
-    
+
+
 }

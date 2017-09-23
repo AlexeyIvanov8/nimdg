@@ -1,7 +1,7 @@
 extern crate iron;
 
 use rustless::Extensible;
-use rustless::{self};
+use rustless;
 
 use data_base::DataBaseManager;
 
