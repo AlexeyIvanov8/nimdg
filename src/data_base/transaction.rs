@@ -1,4 +1,5 @@
 
+
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::fmt;
@@ -176,12 +177,9 @@ impl TransactionManager {
                        locked_transaction.locked_keys.iter().count());
                 for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
                     locked_value.update_reference();
-                    try!(TransactionManager::unlock_value(locked_transaction.id.clone(),
-                                                          data_base_manager,
-                                                          locked_key,
-                                                          locked_value));
+                    try!(TransactionManager::unlock_value(locked_transaction.id.clone(), locked_value));
                     match locked_value.reference {
-                        Some(_) => {}
+                        Some(ref reference) => {}
                         None => {
                             let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
                             table.raw_put(locked_key.key.clone(), locked_value.value.clone());
@@ -196,7 +194,7 @@ impl TransactionManager {
         }
     }
 
-    pub fn rollback(&self, data_base_manager: &DataBaseManager, id: &u32) -> Result<(), PersistenceError> {
+    pub fn rollback(&self, id: &u32) -> Result<(), PersistenceError> {
         debug!("Begin rollback {}", id);
         match self.transactions.remove(&id) {
             Some(transaction) => {
@@ -204,11 +202,8 @@ impl TransactionManager {
                 debug!("Lock tx for rollback {}, tx cache size = {}",
                        locked_transaction.id,
                        locked_transaction.locked_keys.iter().count());
-                for (locked_key, locked_value) in locked_transaction.locked_keys.iter() {
-                    try!(TransactionManager::unlock_value(locked_transaction.id.clone(),
-                                                          data_base_manager,
-                                                          locked_key,
-                                                          locked_value));
+                for (_, locked_value) in locked_transaction.locked_keys.iter() {
+                    try!(TransactionManager::unlock_value(locked_transaction.id.clone(), locked_value));
                 }
                 locked_transaction.locked_keys.clear();
                 debug!("Tx with id = {} stopped", id);
@@ -218,11 +213,7 @@ impl TransactionManager {
         }
     }
 
-    fn unlock_value(tx_id: u32,
-                    data_base_manager: &DataBaseManager,
-                    locked_key: &LockedKey,
-                    locked_value: &LockedValue)
-                    -> Result<(), PersistenceError> {
+    fn unlock_value(tx_id: u32, locked_value: &LockedValue) -> Result<(), PersistenceError> {
         match locked_value.reference {
             Some(ref value_entity) => {
                 let mut mut_value_entity: MutexGuard<Entity> = value_entity.lock().unwrap();

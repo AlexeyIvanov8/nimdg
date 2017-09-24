@@ -613,6 +613,6 @@ impl DataBaseManager {
     }
 
     pub fn tx_rollback(&self, tx_id: &u32) -> Result<(), PersistenceError> {
-        self.tx_manager.rollback(self, tx_id)
+        self.tx_manager.rollback(tx_id)
     }
 }

@@ -199,7 +199,7 @@ pub fn mount_api() {
                 })
             });
 
-            cache_api.get("get/:table_name/:tx_id", |endpoint| {
+            cache_api.get("get/:table_name/:tx_id/:key", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
                     params.req("key", |_| {}); //, json_dsl::object());
@@ -210,11 +210,15 @@ pub fn mount_api() {
                     handle_response(client, |client| {
                         info!("get entity from table {}", params);
                         let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
+
                         let key = try!(params.find("key")
                             .and_then(|key| key.as_str())
-                            .map(|key| rustless::json::JsonValue::from_str(key)
-                              .map_err(|error| ClientError::new(ClientErrorType::GettingParamsError(vec![format!("key:{}", error)]))))
+                            .map(|key| {
+                                rustless::json::JsonValue::from_str(key)
+                                    .map_err(|error| ClientError::new(ClientErrorType::GettingParamsError(vec![format!("key:{}", error)])))
+                            })
                             .unwrap_or(Err(ClientError::new(ClientErrorType::GettingParamsError(vec![format!("key")])))));
+
                         let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
 
                         let db_manager = client.app.get_data_base_manager();
