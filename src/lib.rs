@@ -1,4 +1,4 @@
-#![feature(rustc_private, pub_restricted, field_init_shorthand)]
+#![feature(rustc_private)]
 #![crate_name="nimdg"]
 
 #[macro_use]
@@ -6,24 +6,18 @@ extern crate log;
 // extern crate env_logger;
 extern crate log4rs;
 
-extern crate rustc_serialize;
 extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate valico;
-extern crate hyper;
 #[macro_use]
 extern crate iron;
 #[macro_use]
 extern crate rustless;
-extern crate serde_json;
 
-use std::collections::BTreeMap;
-use std::fmt;
 use std::fmt::Display;
 
 use valico::json_dsl;
 use rustless::batteries::swagger;
-use std::str::FromStr;
 
 use rustless::{Application, Api, Nesting, Versioning};
 use rustless::framework::client::{Client, ClientResult};
@@ -32,7 +26,9 @@ use rustless::json::JsonValue;
 pub mod data_base;
 
 use self::data_base::app_extension::DataBaseExtension;
-use self::data_base::meta::{EntityDescriptionView, TableDescriptionView};
+use self::data_base::meta::TableDescriptionView;
+
+use std::str::FromStr;
 
 fn run_data_base_manager(app: &mut rustless::Application) {
     let data_base_manager = data_base::DataBaseManager::new();
@@ -119,7 +115,11 @@ fn get_key_and_value(params: &rustless::json::JsonValue) -> Result<(&rustless::j
 fn get_parameter<'s, T>(name: &str, params: &'s JsonValue, mapping: &Fn(&'s JsonValue) -> Option<T>) -> Result<T, ClientError> {
     params.find(name)
         .and_then(|value| mapping(value))
-        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![String::from(name)])))
+        .ok_or(ClientError::new(ClientErrorType::GettingParamsError(vec![format!("{}:{}",
+                                                                                 String::from(name),
+                                                                                 params.find(name)
+                                                                                     .map(|param| param.to_string())
+                                                                                     .unwrap_or("not found".to_string()))])))
 }
 
 pub fn mount_api() {
@@ -139,7 +139,6 @@ pub fn mount_api() {
                 endpoint.handle(|client, _| {
                     let db_manager = client.app.get_data_base_manager();
                     db_manager.print_info();
-                    // client.text("Some usefull info".to_string())
                     client.json(&db_manager.get_tables_json_list())
                 })
             });
@@ -200,19 +199,22 @@ pub fn mount_api() {
                 })
             });
 
-            cache_api.get("get/:table_name/:tx_id/:key", |endpoint| {
+            cache_api.get("get/:table_name/:tx_id", |endpoint| {
                 endpoint.params(|params| {
                     params.req_typed("table_name", json_dsl::string());
-                    params.req_typed("key", json_dsl::object());
+                    params.req("key", |_| {}); //, json_dsl::object());
                     params.req_typed("tx_id", json_dsl::i64())
                 });
 
-                endpoint.handle(|mut client, params| {
-                    handle_response(client, |mut client| {
+                endpoint.handle(|client, params| {
+                    handle_response(client, |client| {
                         info!("get entity from table {}", params);
                         let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
-                        let key = try!(get_parameter("key", params, &rustless::json::JsonValue::as_object)
-                            .map(|key| rustless::json::JsonValue::Object(key.clone())));
+                        let key = try!(params.find("key")
+                            .and_then(|key| key.as_str())
+                            .map(|key| rustless::json::JsonValue::from_str(key)
+                              .map_err(|error| ClientError::new(ClientErrorType::GettingParamsError(vec![format!("key:{}", error)]))))
+                            .unwrap_or(Err(ClientError::new(ClientErrorType::GettingParamsError(vec![format!("key")])))));
                         let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64)) as u32;
 
                         let db_manager = client.app.get_data_base_manager();
@@ -241,8 +243,8 @@ pub fn mount_api() {
                     params.req_typed("count", json_dsl::u64())
                 });
 
-                endpoint.handle(|mut client, params| {
-                    handle_response(client, |mut client| {
+                endpoint.handle(|client, params| {
+                    handle_response(client, |client| {
                         debug!("Get list entities from table {}", params);
                         let table_name = try!(get_parameter("table_name", params, &rustless::json::JsonValue::as_str));
                         let tx_id = try!(get_parameter("tx_id", params, &rustless::json::JsonValue::as_u64));
@@ -256,8 +258,6 @@ pub fn mount_api() {
                                                             count as u32);
                         data_list.map(|data_list| rustless::json::JsonValue::Array(data_list))
                             .map_err(|error| client_error!(error))
-
-                        // Ok(rustless::json::JsonValue::String(String::from("rff")))
                     })
                 })
             });
@@ -271,7 +271,7 @@ pub fn mount_api() {
                         params.req_typed("value", json_dsl::object())
                     });
 
-                    endpoint.handle(|mut client, params| {
+                    endpoint.handle(|client, params| {
                         handle_response(client, |client| {
                             info!("Table update");
                             let table_desc = try!(TableDescriptionView::from_json(params).map_err(|error| ClientError::from_display(&error)));

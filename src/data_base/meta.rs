@@ -75,11 +75,6 @@ impl EntityDescriptionView {
             }
             None => Err(IoEntityError::Read(String::from("Property fields not found"))),
         }
-
-        // let fields_object = json.get("fields").unwrap().as_object().unwrap();
-        // let fields =
-        // fields_object.iter().map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap()))).collect();
-        // EntityDescriptionView { fields: fields }
     }
 }
 

@@ -198,7 +198,7 @@ impl Table {
                 })
                 .map(|(type_id, _)| type_id.to_string())
                 .fold(String::new(), |acc, type_id| acc + ", " + type_id.as_str());
-            Err(IoEntityError::Write("Not found field descriptions for some fields ".to_string() + unset.as_str()))
+            Err(IoEntityError::Write(format!("Not found field descriptions for some fields {}", unset)))
         } else {
             Ok(rustless::json::JsonValue::Object(json_object))
         }
@@ -226,12 +226,12 @@ impl Table {
         match value_from_transaction {
             Some(locked_value) => {
                 debug!("Lock for key = {} already taken",
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.key_to_string(key_entity));
                 Ok(Some(locked_value.value.clone()))
             }
             None => {
                 debug!("Entity with key = {} not locked yet",
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.key_to_string(key_entity));
                 match value_entity {
                     Some(value_entity) => {
                         let locked_value = self.lock_value(tx_id, &locked_transaction, key_entity, value_entity);
@@ -536,7 +536,7 @@ impl DataBaseManager {
             self.type_descriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
             Ok(())
         } else {
-            Err("Type with name ".to_string() + type_desc.name.clone().as_str() + " already defined.")
+            Err(format!("Type with name {} already defined.", type_desc.name))
         }
     }
 
@@ -574,7 +574,7 @@ impl DataBaseManager {
                                }));
             Ok(table_description.name.clone())
         } else {
-            Err("Table with name ".to_string() + table_description.name.as_str() + " already exists.")
+            Err(format!("Table with name {} already exists.", table_description.name))
         }
     }
 

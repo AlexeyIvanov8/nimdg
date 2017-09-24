@@ -1,28 +1,12 @@
 
-extern crate iron;
-extern crate concurrent_hashmap;
-extern crate bincode;
-extern crate serde_json;
-
-use std;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::boxed::Box;
 use std::fmt;
-use std::fmt::{Debug, Display};
 use std::sync::{Mutex, MutexGuard, Condvar};
 
 use concurrent_hashmap::*;
 
-use bincode::rustc_serialize::{encode, decode};
-
-use rustless;
-use rustless::json::ToJson;
-
 use data_base::{DataBaseManager, Entity, PersistenceError, Table};
-use data_base::meta::EntityDescription;
 
 const DEFAULT_TX_ID: u32 = 0;
 
@@ -197,11 +181,10 @@ impl TransactionManager {
                                                           locked_key,
                                                           locked_value));
                     match locked_value.reference {
-                        Some(ref reference) => {}
+                        Some(_) => {}
                         None => {
                             let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
                             table.raw_put(locked_key.key.clone(), locked_value.value.clone());
-                            // debug!("Put new value in table in tx {}, lock = {:?}", id, locked_value.value.lock);
                         }
                     }
                 }
@@ -258,12 +241,7 @@ impl TransactionManager {
                     Ok(())
                 }
             }
-            None => {
-                // debug!("Not found referense for unlock key = {:?}", locked_key);
-                // let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
-                // table.raw_put(locked_key.key.clone(), locked_value.value.clone());
-                Ok(())
-            }
+            None => Ok(()),
         }
     }
 
@@ -309,7 +287,6 @@ impl TransactionManager {
 
 impl Transaction {
     pub fn add_entity(&self, table: &Table, key: Entity, value: Option<Arc<Mutex<Entity>>>, copy_value: Entity) -> bool {
-        // let copy_value = value.as_ref().lock().unwrap().clone();
         self.locked_keys
             .insert(LockedKey {
                         table_name: table.description.name.clone(),
