@@ -238,10 +238,10 @@ fn get_list_test() {
 
 fn get_and_print_list_entities(data_base_manager: &DataBaseManager, client_table_name: &String) {
     let tx_id2 = data_base_manager.tx_start().map_err(|err| println!("Tx start error = {}", err)).unwrap();
-    let list_5 = data_base_manager.get_list(&tx_id2, client_table_name, 0, 5).map_err(|err| println!("Failed get list = {}", err)).unwrap();
+    let list_5 = data_base_manager.get_list(tx_id2.clone(), client_table_name, 0, 5).map_err(|err| println!("Failed get list = {}", err)).unwrap();
     info!("Found {} of 0 to 5 elements", list_5.len());
-    for (key, value) in list_5 {
-        info!("  05:{} -> {}", key, value);
+    for pair in list_5 {
+        info!("  05:{}", pair);
     }
     data_base_manager.tx_stop(&tx_id2).map_err(|err| println!("Tx commit error = {}", err)).unwrap();
 }

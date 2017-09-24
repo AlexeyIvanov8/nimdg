@@ -1,18 +1,14 @@
 
-extern crate iron;
-extern crate concurrent_hashmap;
 extern crate bincode;
-extern crate serde_json;
 extern crate chrono;
 
 use std;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::boxed::Box;
 use std::fmt::{Debug, Display};
-use std::sync::{Mutex, MutexGuard, Condvar};
+use std::sync::Mutex;
 use std::collections::HashMap;
 
 use concurrent_hashmap::*;
@@ -27,10 +23,9 @@ pub mod meta;
 pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
-use data_base::transaction::{Transaction, TransactionManager, Lock, LockType, LockedValue};
+use data_base::transaction::{Transaction, TransactionManager, Lock, LockType};
 
 use self::chrono::prelude::*;
-use std::str::FromStr;
 
 
 // Top struct for interaction with tables
@@ -163,7 +158,7 @@ impl Table {
             let types_keys = description.fields.keys().map(|key| key.clone()).collect::<HashSet<String>>();
             let unselected_typed_keys = &selected_values_keys ^ &types_keys;
 
-            try!(check_unselected_keys(unselected_json_keys, unselected_typed_keys));
+            try!(Table::check_unselected_keys(unselected_json_keys, unselected_typed_keys));
             let fields: Result<BTreeMap<u16, Field>, _> = selected_values.iter()
                 .map(|(_, &(field_id, ref type_desc, ref value))| ((type_desc.reader)(&value)).map(|value| (field_id, Field { data: value })))
                 .collect();
@@ -220,24 +215,6 @@ impl Table {
         self.data.insert(key, Arc::new(Mutex::new(value)))
     }
 
-
-    fn get(&self, key_entity: &Entity) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
-        match self.data.find(&key_entity) {
-            Some(data) => {
-                // data.get().lock();
-                Table::entity_to_json(&data.get().lock().unwrap().clone(), &self.description.value)
-                    .map(|json_entity| Some(json_entity))
-                    .map_err(|err| PersistenceError::IoEntity(err))
-            }
-            None => Ok(None),
-        }
-    }
-
-    fn get_copy_of_locked_value(locked_value: Arc<Mutex<Entity>>) -> Entity {
-        let locked_value_unwrap = locked_value.lock().unwrap();
-        locked_value_unwrap.clone()
-    }
-
     fn get_lock_for_get(&self,
                         tx_id: &u32,
                         key_entity: &Entity,
@@ -245,8 +222,8 @@ impl Table {
                         -> Result<Option<Entity>, PersistenceError> {
         let transaction = try!(self.tx_manager.get_tx(tx_id));
         let locked_transaction = transaction.lock().unwrap();
-        let value_accessor = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
-        match value_accessor {
+        let value_from_transaction = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
+        match value_from_transaction {
             Some(locked_value) => {
                 debug!("Lock for key = {} already taken",
                        Table::entity_to_json(key_entity, &self.description.key).unwrap());
@@ -267,26 +244,10 @@ impl Table {
                                                    &locked_transaction,
                                                    key_entity,
                                                    accessor.get().clone()))
-
-                                // let lock_type = Table::get_lock_type(accessor.get().clone());
-                                // debug!("Lock type = {:?}", lock_type);
-                                // match lock_type {
-                                // LockType::Read => {
-                                // let locked_value = TransactionManager::lock_value(
-                                // tx_id,
-                                // self,
-                                // &locked_transaction,
-                                // key_entity,
-                                // Some(accessor.get().clone())
-                                // );
-                                // Ok(locked_value)
-                                // },
-                                // LockType::Write => Ok(Some(accessor.get().lock().unwrap().clone()))
-                                // }
                             }
                             None => {
                                 debug!("Not found value by key {:?} in table {}",
-                                       Table::entity_to_json(key_entity, &self.description.key),
+                                       self.key_to_string(key_entity),
                                        self.description.name);
                                 Ok(None)
                             }
@@ -321,18 +282,17 @@ impl Table {
         // Try get lock on key
         let locked_transaction = transaction.lock().unwrap();
         let locked_value = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
-        // debug!("Contains test = {}", locked_transaction.locked_keys.find(key_entity).is_some());
         match locked_value {
             Some(value) => {
                 debug!("In tx {} found value {} by key {}",
                        tx_id,
-                       Table::entity_to_json(&value.value, &self.description.value).unwrap(),
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.value_to_string(&value.value),
+                       self.key_to_string(key_entity));
                 Ok(Some(value.value.clone()))
             }
             None => {
                 debug!("Entity with key = {} not locked yet",
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.key_to_string(key_entity));
                 match self.data.find_mut(key_entity) {
                     Some(mut accessor) => {
                         TransactionManager::lock_value(tx_id,
@@ -344,11 +304,10 @@ impl Table {
                     }
                     None => {
                         debug!("Tx not contains key yet. Add key {}",
-                               Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                               self.key_to_string(key_entity));
                         let mut new_key_entity = key_entity.clone();
                         new_key_entity.lock.tx_id = tx_id.clone();
                         locked_transaction.add_entity(self,
-                                                      // key_entity.clone()
                                                       new_key_entity,
                                                       None,
                                                       inserted_value.lock().unwrap().clone());
@@ -361,12 +320,6 @@ impl Table {
     }
 
     fn tx_get_list_entities(&self, tx_id: u32, start: u32, count: u32) -> Result<HashMap<Entity, Entity>, PersistenceError> {
-        // for (key, value) in self.data.iter() {
-        // debug!("{}: {:?} -> {:?}", self.description.name,
-        // Table::entity_to_json(key, &self.description.key),
-        // Table::entity_to_json(&value.lock().unwrap(), &self.description.value))
-        // };
-
         let res = self.data
             .iter()
             .skip(start as usize)
@@ -378,7 +331,7 @@ impl Table {
             })
             .map(|r| match r {
                 Ok(entry) => Some(entry),
-                Err(err) => None,
+                Err(_) => None,
             })
             .filter_map(|r| r);
 
@@ -399,27 +352,33 @@ impl Table {
         res
     }
 
+    fn key_to_string(&self, entity: &Entity) -> String {
+        match Table::entity_to_json(entity, &self.description.key) {
+            Ok(res) => res.to_string(),
+            Err(error) => String::from(error.to_string()),
+        }
+    }
+
+    fn value_to_string(&self, entity: &Entity) -> String {
+        match Table::entity_to_json(entity, &self.description.value) {
+            Ok(res) => res.to_string(),
+            Err(error) => String::from(error.to_string()),
+        }
+    }
+
     fn tx_get_entity(&self, tx_id: &u32, key_entity: &Entity) -> Result<Option<Entity>, PersistenceError> {
         let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, key_entity, None));
         match locked_value {
             Some(value) => {
                 debug!("In current tx found value = {} by key = {}",
-                       Table::entity_to_json(&value, &self.description.value).unwrap(),
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.value_to_string(&value),
+                       self.key_to_string(key_entity));
                 Ok(Some(value))
             }
             None => {
                 debug!("In current tx not found value for key = {}",
-                       Table::entity_to_json(key_entity, &self.description.key).unwrap());
+                       self.key_to_string(key_entity));
                 Ok(self.data.find(key_entity).map(|data| data.get().lock().unwrap().clone()))
-                // match self.data.find(key_entity) {
-                // Some(data) => {
-                // &data.get().lock().unwrap().clone()
-                // .map(|value_entity| Some(value_entity))
-                // .map_err(|err| PersistenceError::IoEntity(err))
-                // },
-                // None => Ok(None)
-                // }
             }
         }
     }
@@ -435,16 +394,13 @@ impl Table {
             .unwrap_or(Ok(None))
     }
 
-    fn get_lock_value(value: Arc<Mutex<Entity>>) -> bool {
-        value.lock().unwrap().lock.is_locked()
-    }
 
     pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
         debug!("Tx put started");
         let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
         let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
         let inserted_value = Arc::new(Mutex::new(value_entity));
-        let lock_result = try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
+        try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
 
         debug!("Upsert value = {} with key = {}",
                Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
