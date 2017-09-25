@@ -287,24 +287,26 @@ pub fn mount_api() {
                     })
                 });
 
+                meta_ns.get("tx/list", |endpoint| {
+                    endpoint.handle(|client, _| {
+                        handle_response(client,
+                                        |client| Ok(client.app.get_data_base_manager().get_transactions_list()))
+                    })
+                });
+
                 meta_ns.get("table/:name", |endpoint| {
                     endpoint.params(|params| params.req_typed("name", json_dsl::string()));
 
                     endpoint.handle(|client, params| {
                         handle_response(client, |client| {
-                            match params.find("name")
-                                .and_then(|name| name.as_str()) {
-                                Some(name) => {
-                                    info!("Table with name {}", name);
-                                    let table_desc = client.app
-                                        .get_data_base_manager()
-                                        .get_table_json(&String::from(name));
-                                    match table_desc {
-                                        Some(table_desc) => Ok(table_desc),
-                                        None => Err(client_error!(format!("Table {} not found", name))),
-                                    }
-                                }
-                                None => Err(client_error!("Parameter table name not found.")),
+                            let name = try!(get_parameter("name", params, &rustless::json::JsonValue::as_str));
+                            info!("Table with name {}", name);
+                            let table_desc = client.app
+                                .get_data_base_manager()
+                                .get_table_json(&String::from(name));
+                            match table_desc {
+                                Some(table_desc) => Ok(table_desc),
+                                None => Err(client_error!(format!("Table {} not found", name))),
                             }
                         })
                     })

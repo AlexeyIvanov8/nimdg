@@ -1,5 +1,7 @@
 
+extern crate rustless;
 
+use rustless::json::JsonValue;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::fmt;
@@ -122,6 +124,13 @@ impl TransactionManager {
             counter: Arc::new(Mutex::new(1)),
             transactions: ConcHashMap::<u32, Arc<Mutex<Transaction>>>::new(),
         }
+    }
+
+    pub fn get_transactions_list(&self) -> rustless::json::JsonValue {
+        JsonValue::Array(self.transactions
+            .iter()
+            .map(|(id, _)| rustless::json::JsonValue::U64(id.clone() as u64))
+            .collect())
     }
 
     pub fn get_tx_id(&self) -> u32 {

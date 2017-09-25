@@ -615,4 +615,8 @@ impl DataBaseManager {
     pub fn tx_rollback(&self, tx_id: &u32) -> Result<(), PersistenceError> {
         self.tx_manager.rollback(tx_id)
     }
+
+    pub fn get_transactions_list(&self) -> rustless::json::JsonValue {
+        self.tx_manager.get_transactions_list()
+    }
 }
