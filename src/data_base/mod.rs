@@ -23,7 +23,7 @@ pub mod meta;
 pub mod transaction;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
-use data_base::transaction::{Transaction, TransactionManager, Lock, LockType};
+use data_base::transaction::{Transaction, TransactionManager, Lock, LockType, LockMode};
 
 use self::chrono::prelude::*;
 
@@ -71,6 +71,7 @@ pub enum PersistenceError {
     Undefined(String),
     UndefinedTransaction(u32),
     TransactionAlreadyStarted(u32),
+    TransactionFailed(String),
     WrongTransaction(u32, u32), // real tx_id, expected tx_id
 }
 
@@ -235,15 +236,15 @@ impl Table {
                 match value_entity {
                     Some(value_entity) => {
                         let locked_value = self.lock_value(tx_id, &locked_transaction, key_entity, value_entity);
-                        Ok(locked_value)
+                        locked_value
                     }
                     None => {
                         match self.data.find_mut(key_entity) {
                             Some(mut accessor) => {
-                                Ok(self.lock_value(tx_id,
-                                                   &locked_transaction,
-                                                   key_entity,
-                                                   accessor.get().clone()))
+                                self.lock_value(tx_id,
+                                                &locked_transaction,
+                                                key_entity,
+                                                accessor.get().clone())
                             }
                             None => {
                                 debug!("Not found value by key {:?} in table {}",
@@ -258,7 +259,12 @@ impl Table {
         }
     }
 
-    fn lock_value(&self, tx_id: &u32, locked_transaction: &Transaction, key_entity: &Entity, value_entity: Arc<Mutex<Entity>>) -> Option<Entity> {
+    fn lock_value(&self,
+                  tx_id: &u32,
+                  locked_transaction: &Transaction,
+                  key_entity: &Entity,
+                  value_entity: Arc<Mutex<Entity>>)
+                  -> Result<Option<Entity>, PersistenceError> {
         let lock_type = Table::get_lock_type(value_entity.clone());
         debug!("Lock type = {:?}", lock_type);
         match lock_type {
@@ -268,8 +274,9 @@ impl Table {
                                                &locked_transaction,
                                                key_entity,
                                                Some(value_entity))
+                    .map_err(|err| PersistenceError::TransactionFailed(format!("{:?}", err)))
             }
-            LockType::Write => Some(value_entity.lock().unwrap().clone()),
+            LockType::Write => Ok(Some(value_entity.lock().unwrap().clone())),
         }
     }
 
@@ -295,11 +302,11 @@ impl Table {
                        self.key_to_string(key_entity));
                 match self.data.find_mut(key_entity) {
                     Some(mut accessor) => {
-                        TransactionManager::lock_value(tx_id,
-                                                       self,
-                                                       &locked_transaction,
-                                                       key_entity,
-                                                       Some(accessor.get().clone()));
+                        try!(TransactionManager::lock_value(tx_id,
+                                                            self,
+                                                            &locked_transaction,
+                                                            key_entity,
+                                                            Some(accessor.get().clone())));
                         Ok(None)
                     }
                     None => {
@@ -604,8 +611,8 @@ impl DataBaseManager {
         table.get().tx_get_list(tx_id, start, count)
     }
 
-    pub fn tx_start(&self) -> Result<u32, PersistenceError> {
-        self.tx_manager.start()
+    pub fn tx_start(&self, lock_mode: LockMode) -> Result<u32, PersistenceError> {
+        self.tx_manager.start(lock_mode)
     }
 
     pub fn tx_stop(&self, tx_id: &u32) -> Result<(), PersistenceError> {

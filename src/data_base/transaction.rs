@@ -38,10 +38,22 @@ pub struct LockedValue {
     pub value: Entity, // actual value in tx
 }
 
+#[derive(PartialEq)]
+pub enum LockMode {
+    Optimistic,
+    Pessimistic,
+}
+
+#[derive(Debug)]
+pub enum TransactionError {
+    LockFailed,
+}
+
 // Struct for store data of transaction
 pub struct Transaction {
     id: u32,
     on: bool, // true - transaction is executed
+    lock_mode: LockMode,
     locked_keys: Arc<ConcHashMap<LockedKey, LockedValue>>, // keys and refs to values of locked entities
 }
 
@@ -157,11 +169,12 @@ impl TransactionManager {
         }
     }
 
-    pub fn start(&self) -> Result<u32, PersistenceError> {
+    pub fn start(&self, lock_mode: LockMode) -> Result<u32, PersistenceError> {
         let id = self.get_tx_id();
         let transaction = Arc::new(Mutex::new(Transaction {
             id: id,
             on: true,
+            lock_mode: lock_mode,
             locked_keys: Arc::new(ConcHashMap::<LockedKey, LockedValue>::new()),
         }));
         match self.transactions.insert(id, transaction) {
@@ -188,7 +201,7 @@ impl TransactionManager {
                     locked_value.update_reference();
                     try!(TransactionManager::unlock_value(locked_transaction.id.clone(), locked_value));
                     match locked_value.reference {
-                        Some(ref reference) => {}
+                        Some(_) => {}
                         None => {
                             let table: Arc<Table> = data_base_manager.get_table(&locked_key.table_name).unwrap();
                             table.raw_put(locked_key.key.clone(), locked_value.value.clone());
@@ -250,38 +263,48 @@ impl TransactionManager {
                       locked_transaction: &Transaction,
                       key_entity: &Entity,
                       value_entity_opt: Option<Arc<Mutex<Entity>>>)
-                      -> Option<Entity> {
-        value_entity_opt.map(|value_entity| {
-            let temp = value_entity.clone();
-            let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
-            let copy_value = mut_value_entity.clone();
-            debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}",
-                   Table::entity_to_json(key_entity, &table.description.key).unwrap(),
-                   mut_value_entity.lock.tx_id,
-                   mut_value_entity.lock.tx_id);
-            if mut_value_entity.lock.tx_id != *tx_id {
-                let ref mut lock_mut = mut_value_entity.lock;
-                let &(ref lock_var, ref condvar) = &*lock_mut.condition;
-                let mut locked = lock_var.lock().unwrap();
-                debug!("Current locked = {}", *locked);
-                while *locked {
-                    debug!("While locked = {}", *locked);
-                    locked = condvar.wait(locked).unwrap();
+                      -> Result<Option<Entity>, PersistenceError> {
+        match value_entity_opt {
+            Some(value_entity) => {
+                let temp = value_entity.clone();
+                let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
+                let copy_value = mut_value_entity.clone();
+                debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}",
+                       Table::entity_to_json(key_entity, &table.description.key).unwrap(),
+                       mut_value_entity.lock.tx_id,
+                       mut_value_entity.lock.tx_id);
+                if mut_value_entity.lock.tx_id != *tx_id {
+                    let ref mut lock_mut = mut_value_entity.lock;
+                    let &(ref lock_var, ref condvar) = &*lock_mut.condition;
+                    let mut locked = lock_var.lock().unwrap();
+                    debug!("Current locked = {}", *locked);
+                    if *locked {
+                        match locked_transaction.lock_mode {
+                            LockMode::Optimistic => return Err(PersistenceError::TransactionFailed(String::from("lock failed"))),
+                            _ => {
+                                while *locked {
+                                    debug!("While locked = {}", *locked);
+                                    locked = condvar.wait(locked).unwrap();
+                                }
+                                debug!("Lock taken = {}", *locked);
+                                *locked = true;
+                                debug!("Lock taken2 = {}", *locked);
+                                lock_mut.tx_id = tx_id.clone();
+                                locked_transaction.add_entity(table,
+                                                              key_entity.clone(),
+                                                              Some(value_entity.clone()),
+                                                              copy_value);
+                                debug!("Lock for key {} is set, tx updated",
+                                       Table::entity_to_json(key_entity, &table.description.key).unwrap());
+                            }
+                        }
+                    }
                 }
-                debug!("Lock taken = {}", *locked);
-                *locked = true;
-                debug!("Lock taken2 = {}", *locked);
-                lock_mut.tx_id = tx_id.clone();
-                locked_transaction.add_entity(table,
-                                              key_entity.clone(),
-                                              Some(value_entity.clone()),
-                                              copy_value);
-                debug!("Lock for key {} is set, tx updated",
-                       Table::entity_to_json(key_entity, &table.description.key).unwrap());
+                debug!("Value locked");
+                Ok(Some(mut_value_entity.clone()))
             }
-            debug!("Value locked");
-            mut_value_entity.clone()
-        })
+            None => Ok(None),
+        }
     }
 }
 

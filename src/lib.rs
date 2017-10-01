@@ -9,9 +9,7 @@ extern crate log4rs;
 extern crate concurrent_hashmap;
 extern crate bincode;
 extern crate valico;
-#[macro_use]
 extern crate iron;
-#[macro_use]
 extern crate rustless;
 
 use std::fmt::Display;
@@ -27,6 +25,7 @@ pub mod data_base;
 
 use self::data_base::app_extension::DataBaseExtension;
 use self::data_base::meta::TableDescriptionView;
+use self::data_base::transaction::LockMode;
 
 use std::str::FromStr;
 
@@ -143,17 +142,32 @@ pub fn mount_api() {
                 })
             });
 
-            cache_api.namespace("tx", |tx_ns| {
+            cache_api.namespace("tx/:mode", |tx_ns| {
                 tx_ns.post("start", |endpoint| {
-                    endpoint.handle(|client, _| {
-                        let db_manager = client.app.get_data_base_manager();
-                        match db_manager.tx_start() {
-                            Ok(tx_id) => {
-                                debug!("Response start tx {}", tx_id);
-                                client.json(&rustless::json::JsonValue::U64(tx_id as u64))
+                    endpoint.params(|params| params.opt_typed("mode", json_dsl::string()));
+
+                    endpoint.handle(|client, params| {
+                        handle_response(client, |client| {
+                            let mode = params.find("mode")
+                                .and_then(|mode_json| mode_json.as_str())
+                                .map(|mode_string| match mode_string {
+                                    "optimistic" => Ok(LockMode::Optimistic),
+                                    "pessimistic" => Ok(LockMode::Pessimistic),
+                                    _ => {
+                                        Err(ClientError::new(ClientErrorType::GettingParamsError(vec![format!("Unknown LockMode {}", mode_string)])))
+                                    }
+                                })
+                                .unwrap_or(Ok(LockMode::Pessimistic));
+
+                            let db_manager = client.app.get_data_base_manager();
+                            match db_manager.tx_start(try!(mode)) {
+                                Ok(tx_id) => {
+                                    debug!("Response start tx {}", tx_id);
+                                    Ok(JsonValue::U64(tx_id as u64))
+                                }
+                                Err(error) => Err(ClientError::new(ClientErrorType::CommonError(error.to_string()))),
                             }
-                            Err(error) => client.text(error.to_string()),
-                        }
+                        })
                     })
                 });
 
