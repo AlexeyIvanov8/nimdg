@@ -226,12 +226,12 @@ impl Table {
         let value_from_transaction = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
         match value_from_transaction {
             Some(locked_value) => {
-                debug!("Lock for key = {} already taken",
+                trace!("Lock for key = {} already taken",
                        self.key_to_string(key_entity));
                 Ok(Some(locked_value.value.clone()))
             }
             None => {
-                debug!("Entity with key = {} not locked yet",
+                trace!("Entity with key = {} not locked yet",
                        self.key_to_string(key_entity));
                 match value_entity {
                     Some(value_entity) => {
@@ -247,7 +247,7 @@ impl Table {
                                                 accessor.get().clone())
                             }
                             None => {
-                                debug!("Not found value by key {:?} in table {}",
+                                trace!("Not found value by key {:?} in table {}",
                                        self.key_to_string(key_entity),
                                        self.description.name);
                                 Ok(None)
@@ -266,7 +266,7 @@ impl Table {
                   value_entity: Arc<Mutex<Entity>>)
                   -> Result<Option<Entity>, PersistenceError> {
         let lock_type = Table::get_lock_type(value_entity.clone());
-        debug!("Lock type = {:?}", lock_type);
+        trace!("Lock type = {:?}", lock_type);
         match lock_type {
             LockType::Read => {
                 TransactionManager::lock_value(tx_id,
@@ -291,14 +291,14 @@ impl Table {
         let locked_value = locked_transaction.get_locked_value(self.description.name.clone(), key_entity);
         match locked_value {
             Some(value) => {
-                debug!("In tx {} found value {} by key {}",
+                trace!("In tx {} found value {} by key {}",
                        tx_id,
                        self.value_to_string(&value.value),
                        self.key_to_string(key_entity));
                 Ok(Some(value.value.clone()))
             }
             None => {
-                debug!("Entity with key = {} not locked yet",
+                trace!("Entity with key = {} not locked yet",
                        self.key_to_string(key_entity));
                 match self.data.find_mut(key_entity) {
                     Some(mut accessor) => {
@@ -310,7 +310,7 @@ impl Table {
                         Ok(None)
                     }
                     None => {
-                        debug!("Tx not contains key yet. Add key {}",
+                        trace!("Tx not contains key yet. Add key {}",
                                self.key_to_string(key_entity));
                         let mut new_key_entity = key_entity.clone();
                         new_key_entity.lock.tx_id = tx_id.clone();
@@ -318,7 +318,7 @@ impl Table {
                                                       new_key_entity,
                                                       None,
                                                       inserted_value.lock().unwrap().clone());
-                        debug!("Return ok for get_lock_for_put");
+                        trace!("Return ok for get_lock_for_put");
                         Ok(None)
                     }
                 }
@@ -377,13 +377,13 @@ impl Table {
         let locked_value: Option<Entity> = try!(self.get_lock_for_get(tx_id, key_entity, None));
         match locked_value {
             Some(value) => {
-                debug!("In current tx found value = {} by key = {}",
+                trace!("In current tx found value = {} by key = {}",
                        self.value_to_string(&value),
                        self.key_to_string(key_entity));
                 Ok(Some(value))
             }
             None => {
-                debug!("In current tx not found value for key = {}",
+                trace!("In current tx not found value for key = {}",
                        self.key_to_string(key_entity));
                 Ok(self.data.find(key_entity).map(|data| data.get().lock().unwrap().clone()))
             }
@@ -403,19 +403,19 @@ impl Table {
 
 
     pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
-        debug!("Tx put started");
+        trace!("Tx put started");
         let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
         let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
         let inserted_value = Arc::new(Mutex::new(value_entity));
         try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
 
-        debug!("Upsert value = {} with key = {}",
+        trace!("Upsert value = {} with key = {}",
                Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
                Table::entity_to_json(&key_entity, &self.description.key).unwrap());
 
         // self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
         for (k, v) in self.data.iter() {
-            debug!("    Current data: {} -> {}",
+            trace!("    Current data: {} -> {}",
                    Table::entity_to_json(k, &self.description.key).unwrap(),
                    Table::entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
         }

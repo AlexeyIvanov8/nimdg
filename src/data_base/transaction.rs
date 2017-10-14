@@ -38,7 +38,7 @@ pub struct LockedValue {
     pub value: Entity, // actual value in tx
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum LockMode {
     Optimistic,
     Pessimistic,
@@ -171,6 +171,7 @@ impl TransactionManager {
 
     pub fn start(&self, lock_mode: LockMode) -> Result<u32, PersistenceError> {
         let id = self.get_tx_id();
+        debug!("Try start tx id = {}, mode = {:?}", id, lock_mode);
         let transaction = Arc::new(Mutex::new(Transaction {
             id: id,
             on: true,
@@ -286,19 +287,20 @@ impl TransactionManager {
                                     debug!("While locked = {}", *locked);
                                     locked = condvar.wait(locked).unwrap();
                                 }
-                                debug!("Lock taken = {}", *locked);
-                                *locked = true;
-                                debug!("Lock taken2 = {}", *locked);
-                                lock_mut.tx_id = tx_id.clone();
-                                locked_transaction.add_entity(table,
-                                                              key_entity.clone(),
-                                                              Some(value_entity.clone()),
-                                                              copy_value);
-                                debug!("Lock for key {} is set, tx updated",
-                                       Table::entity_to_json(key_entity, &table.description.key).unwrap());
                             }
                         }
                     }
+
+                    debug!("Lock taken = {}", *locked);
+                    *locked = true;
+                    debug!("Lock taken2 = {}", *locked);
+                    lock_mut.tx_id = tx_id.clone();
+                    locked_transaction.add_entity(table,
+                                                  key_entity.clone(),
+                                                  Some(value_entity.clone()),
+                                                  copy_value);
+                    debug!("Lock for key {} is set, tx updated",
+                           Table::entity_to_json(key_entity, &table.description.key).unwrap());
                 }
                 debug!("Value locked");
                 Ok(Some(mut_value_entity.clone()))

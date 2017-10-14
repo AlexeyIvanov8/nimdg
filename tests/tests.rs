@@ -21,46 +21,8 @@ use nimdg::data_base::transaction::LockMode;
 
 mod data_base_test;
 
-#[derive(Serialize, Deserialize)]
-struct IdKey {
-    id: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Client {
-    full_name: String,
-    age: u64,
-}
-
-fn create_test_data_base() -> DataBaseManager {
-    let client_table_name: String = String::from("Client");
-    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
-    let table_desc = JsonValue::from_str("{
-        \"name\": \"Client\",
-        \"key\": {
-            \"fields\": {
-                \"id\": \"u64\"
-            }
-        },
-        \"value\": {
-            \"fields\": {
-                \"full_name\": \"string\",
-                \"age\": \"u64\"
-             }
-        }
-    }");
-
-    let table_desc_json = table_desc.unwrap();
-    info!("Table desc json = {}", table_desc_json);
-    let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
-    let table_desc_view = table_desc_view_res.unwrap();
-    info!("Table desc view = {:?}", table_desc_view);
-    data_base_manager.add_table(table_desc_view);
-    info!("Added table {}",
-          data_base_manager.get_table_json(&client_table_name).unwrap());
-
-    data_base_manager
-}
+use data_base_test::create_test_data_base;
+use data_base_test::{IdKey, Client};
 
 fn fill_test_data_base(data_base_manager: &DataBaseManager) {}
 
@@ -122,42 +84,6 @@ fn put_test() {
 }
 
 #[test]
-fn rollback_test() {
-    log4rs::init_file("config/log4rs.yml", Default::default());
-
-    let client_table_name: String = String::from("Client");
-    let data_base_manager = create_test_data_base();
-
-    let key_one = JsonValue::from_str("{\"id\": 2 }").unwrap();
-    let value_one = JsonValue::from_str("{
-        \"full_name\": \"John Doe\",
-        \"age\": 23
-    }")
-        .unwrap();
-
-    info!("Begin rollback test");
-    let tx_id = data_base_manager.tx_start(LockMode::Pessimistic).unwrap();
-    let res = data_base_manager.add_data(&tx_id, &client_table_name, &key_one, &value_one);
-    info!("Add data = {:?}", res);
-    assert!(res.is_ok());
-    let stored_value_one = data_base_manager.get_data(&tx_id, &client_table_name, &key_one);
-    info!("Getting uncommited data = {:?}", stored_value_one);
-    assert!(stored_value_one.is_ok());
-    assert!(stored_value_one.unwrap().is_some());
-
-    data_base_manager.tx_rollback(&tx_id);
-    info!("Tx is rollback {}", tx_id);
-
-    let tx_id_2 = data_base_manager.tx_start(LockMode::Pessimistic).unwrap();
-    let stored_value_one_after = data_base_manager.get_data(&tx_id_2, &client_table_name, &key_one);
-    info!("Getting uncommited data after rollback = {:?}",
-          stored_value_one_after);
-    assert!(stored_value_one_after.is_ok());
-    assert!(stored_value_one_after.unwrap().is_none());
-    data_base_manager.tx_stop(&tx_id_2);
-}
-
-#[test]
 fn date_test() {
     log4rs::init_file("config/log4rs.yml", Default::default());
 
@@ -166,12 +92,14 @@ fn date_test() {
         \"name\": \"Times\",
         \"key\": {
             \"fields\": {
-                \"id\": \"u64\"
+                \"id\": \
+                                          \"u64\"
             }
         },
         \"value\": {
             \"fields\": {
-                \"date\": \"date\"
+                \
+                                          \"date\": \"date\"
                 \"date_time\": \"date_time\"
              }
         }
@@ -191,7 +119,8 @@ fn date_test() {
             let key = JsonValue::from_str("{\"id\": 2 }").unwrap();
             let value = JsonValue::from_str("{
                 \"date\": \"2016-02-03\",
-                \"date_time\": \"2017-05-21T13:41:00+03:00\"
+                \"date_time\": \
+                                             \"2017-05-21T13:41:00+03:00\"
             }")
                 .unwrap();
             println!("prepare datas");
