@@ -1,4 +1,7 @@
 
+extern crate serde;
+extern crate serde_json;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::boxed::Box;
@@ -10,6 +13,7 @@ use rustless;
 use data_base::IoEntityError;
 
 // Type trait, that allow define user type
+#[derive(Serialize, Deserialize)]
 pub struct TypeDescription {
     pub name: String,
     pub reader: Box<Fn(&rustless::json::JsonValue) -> Result<Vec<u8>, IoEntityError>>,
@@ -18,6 +22,7 @@ pub struct TypeDescription {
 
 // Universal description of some entity. For example: key or value
 // For performance purposes each field is marked by number id
+#[derive(Serialize, Deserialize)]
 pub struct EntityDescription {
     count: AtomicUsize,
     pub fields: BTreeMap<String, Arc<Box<TypeDescription>>>,
@@ -26,6 +31,7 @@ pub struct EntityDescription {
 }
 
 // Description of table, that is key-value cache
+#[derive(Serialize, Deserialize)]
 pub struct TableDescription {
     pub name: String,
     pub key: EntityDescription,

@@ -1,6 +1,10 @@
 #![feature(rustc_private)]
 #![crate_name="nimdg"]
 
+
+#[macro_use]
+extern crate serde_derive;
+
 #[macro_use]
 extern crate log;
 // extern crate env_logger;
@@ -20,6 +24,7 @@ use rustless::batteries::swagger;
 use rustless::{Application, Api, Nesting, Versioning};
 use rustless::framework::client::{Client, ClientResult};
 use rustless::json::JsonValue;
+use rustless::server::status::StatusCode;
 
 pub mod data_base;
 
@@ -127,6 +132,14 @@ pub fn mount_api() {
     info!("Hello, world!");
 
     let api = Api::build(|api| {
+
+        api.error_formatter(|err, _media| {
+            match err.downcast::<rustless::errors::NotMatch>() {
+                Some(_) => return Some(rustless::Response::new(StatusCode::NotFound)),
+                None => None,
+            }
+        });
+
         api.version("v1", Versioning::Path);
         api.prefix("api");
 
@@ -142,8 +155,8 @@ pub fn mount_api() {
                 })
             });
 
-            cache_api.namespace("tx/:mode", |tx_ns| {
-                tx_ns.post("start", |endpoint| {
+            cache_api.namespace("tx", |tx_ns| {
+                tx_ns.post(":mode/start", |endpoint| {
                     endpoint.params(|params| params.opt_typed("mode", json_dsl::string()));
 
                     endpoint.handle(|client, params| {
@@ -352,7 +365,7 @@ pub fn mount_api() {
                         ..std::default::Default::default()
                     });
 
-    iron::Iron::new(app).http("localhost:4300").unwrap();
+    iron::Iron::new(app).http("127.0.0.1:4300").unwrap();
 
 
 }

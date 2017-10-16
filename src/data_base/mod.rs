@@ -21,6 +21,7 @@ use rustless::json::ToJson;
 pub mod app_extension;
 pub mod meta;
 pub mod transaction;
+mod file_storage;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
 use data_base::transaction::{Transaction, TransactionManager, Lock, LockType, LockMode};
@@ -73,6 +74,7 @@ pub enum PersistenceError {
     TransactionAlreadyStarted(u32),
     TransactionFailed(String),
     WrongTransaction(u32, u32), // real tx_id, expected tx_id
+    FileStorageError(String),
 }
 
 impl Display for IoEntityError {
