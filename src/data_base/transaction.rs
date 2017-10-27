@@ -271,7 +271,7 @@ impl TransactionManager {
                 let mut mut_value_entity: MutexGuard<Entity> = temp.lock().unwrap();
                 let copy_value = mut_value_entity.clone();
                 debug!("Lock for key {} is taken; lock id on key = {}, prev tx_id = {}",
-                       Table::entity_to_json(key_entity, &table.description.key).unwrap(),
+                       table.entity_to_json(key_entity, &table.description.key).unwrap(),
                        mut_value_entity.lock.tx_id,
                        mut_value_entity.lock.tx_id);
                 if mut_value_entity.lock.tx_id != *tx_id {
@@ -300,7 +300,7 @@ impl TransactionManager {
                                                   Some(value_entity.clone()),
                                                   copy_value);
                     debug!("Lock for key {} is set, tx updated",
-                           Table::entity_to_json(key_entity, &table.description.key).unwrap());
+                           table.entity_to_json(key_entity, &table.description.key).unwrap());
                 }
                 debug!("Value locked");
                 Ok(Some(mut_value_entity.clone()))

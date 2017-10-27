@@ -31,10 +31,14 @@ use self::chrono::prelude::*;
 
 // Top struct for interaction with tables
 pub struct DataBaseManager {
-    type_descriptions: BTreeMap<String, Arc<Box<TypeDescription>>>,
     table_descriptions: ConcHashMap<String, TableDescription>,
     tables: ConcHashMap<String, Arc<Table>>,
     tx_manager: Arc<TransactionManager>,
+    meta_manager: Arc<MetaManager>,
+}
+
+pub struct MetaManager {
+    type_descriptions: ConcHashMap<String, Arc<Box<TypeDescription>>>,
 }
 
 // Field of entity
@@ -55,6 +59,7 @@ pub struct Table {
     description: TableDescription,
     data: ConcHashMap<Entity, Arc<Mutex<Entity>>>,
     tx_manager: Arc<TransactionManager>,
+    meta_manager: Arc<MetaManager>,
 }
 
 // Errors
@@ -117,12 +122,14 @@ impl Hash for Entity {
 
 // Table impl
 impl Table {
-    fn select_field_descriptions(description: &EntityDescription,
+    fn select_field_descriptions(&self,
+                                 description: &EntityDescription,
                                  entity_json: &rustless::json::Object)
                                  -> BTreeMap<String, (u16, Arc<Box<TypeDescription>>, rustless::json::JsonValue)> {
         entity_json.iter()
             .filter_map(|(name, value)| {
-                let type_desc = description.get_field(name);
+                let type_desc = description.get_field(name)
+                    .and_then(|field_description| self.meta_manager.get_type(&field_description.type_name));
                 let field_id = description.get_field_id(name);
 
                 if let (Some(type_desc), Some(field_id)) = (type_desc, field_id) {
@@ -146,11 +153,11 @@ impl Table {
         }
     }
 
-    fn json_to_entity(json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
+    fn json_to_entity(&self, json: &rustless::json::JsonValue, description: &EntityDescription) -> Result<Entity, IoEntityError> {
         if json.is_object() {
             let json_object = try!(json.as_object().ok_or(IoEntityError::Read("Json object not found".to_string())));
             // 1. select types for json fields
-            let selected_values = Table::select_field_descriptions(description, json_object);
+            let selected_values = self.select_field_descriptions(description, json_object);
             let selected_values_keys = selected_values.keys().map(|key| key.clone()).collect::<HashSet<String>>();
 
             // 2. check what all fields is typed and
@@ -176,7 +183,7 @@ impl Table {
         }
     }
 
-    fn entity_to_json(entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, IoEntityError> {
+    fn entity_to_json(&self, entity: &Entity, entity_description: &EntityDescription) -> Result<rustless::json::JsonValue, IoEntityError> {
         let json_object: BTreeMap<String, rustless::json::JsonValue> = try!(entity.fields
             .iter()
             .filter_map(|(type_id, value)| {
@@ -184,7 +191,11 @@ impl Table {
                 let type_desc = field_name.and_then(|field_name| {
                     entity_description.fields
                         .get(field_name)
-                        .map(|type_desc| (field_name, type_desc))
+                        .and_then(|field_description| {
+                            self.meta_manager
+                                .get_type(&field_description.type_name)
+                                .map(|type_desc| (field_name, type_desc))
+                        })
                 });
                 type_desc.map(|(name, type_desc)| ((type_desc.writer)(&value.data)).map(|data| (name.clone(), data)))
             })
@@ -208,8 +219,8 @@ impl Table {
     }
 
     pub fn put(&self, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
-        let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-        let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
+        let key_entity = try!(self.json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+        let value_entity = try!(self.json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
         self.data.insert(key_entity, Arc::new(Mutex::new(value_entity)));
         Ok(())
     }
@@ -351,8 +362,8 @@ impl Table {
         let entities_map: HashMap<Entity, Entity> = try!(self.tx_get_list_entities(tx_id, start, count));
         let res: Result<Vec<rustless::json::JsonValue>, PersistenceError> = entities_map.iter()
             .map(|(key, value)| {
-                Table::entity_to_json(key, &self.description.key).and_then(|key_json| {
-                    Table::entity_to_json(value, &self.description.value)
+                self.entity_to_json(key, &self.description.key).and_then(|key_json| {
+                    self.entity_to_json(value, &self.description.value)
                         .map(|value_json| rustless::json::JsonValue::Array(vec![key_json, value_json]))
                 })
             })
@@ -362,14 +373,14 @@ impl Table {
     }
 
     fn key_to_string(&self, entity: &Entity) -> String {
-        match Table::entity_to_json(entity, &self.description.key) {
+        match self.entity_to_json(entity, &self.description.key) {
             Ok(res) => res.to_string(),
             Err(error) => String::from(error.to_string()),
         }
     }
 
     fn value_to_string(&self, entity: &Entity) -> String {
-        match Table::entity_to_json(entity, &self.description.value) {
+        match self.entity_to_json(entity, &self.description.value) {
             Ok(res) => res.to_string(),
             Err(error) => String::from(error.to_string()),
         }
@@ -393,10 +404,10 @@ impl Table {
     }
 
     pub fn tx_get(&self, tx_id: &u32, key: &rustless::json::JsonValue) -> Result<Option<rustless::json::JsonValue>, PersistenceError> {
-        let key_entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+        let key_entity = try!(self.json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
         let value_entity = try!(self.tx_get_entity(tx_id, &key_entity));
         value_entity.map(|value_entity| {
-                Table::entity_to_json(&value_entity, &self.description.value)
+                self.entity_to_json(&value_entity, &self.description.value)
                     .map(|r| Some(r))
                     .map_err(|err| PersistenceError::IoEntity(err))
             })
@@ -406,33 +417,28 @@ impl Table {
 
     pub fn tx_put(&self, tx_id: &u32, key: &rustless::json::JsonValue, value: &rustless::json::JsonValue) -> Result<(), PersistenceError> {
         trace!("Tx put started");
-        let key_entity: Entity = try!(Table::json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
-        let value_entity = try!(Table::json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
+        let key_entity: Entity = try!(self.json_to_entity(key, &self.description.key).map_err(|err| PersistenceError::IoEntity(err)));
+        let value_entity = try!(self.json_to_entity(value, &self.description.value).map_err(|err| PersistenceError::IoEntity(err)));
         let inserted_value = Arc::new(Mutex::new(value_entity));
         try!(self.get_lock_for_put(tx_id, &key_entity, inserted_value.clone()));
 
         trace!("Upsert value = {} with key = {}",
-               Table::entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
-               Table::entity_to_json(&key_entity, &self.description.key).unwrap());
+               self.entity_to_json(&inserted_value.lock().unwrap(), &self.description.value).unwrap(),
+               self.entity_to_json(&key_entity, &self.description.key).unwrap());
 
         // self.data.upsert(key_entity, inserted_value.clone(), &|value| *value = inserted_value.clone());
         for (k, v) in self.data.iter() {
             trace!("    Current data: {} -> {}",
-                   Table::entity_to_json(k, &self.description.key).unwrap(),
-                   Table::entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
+                   self.entity_to_json(k, &self.description.key).unwrap(),
+                   self.entity_to_json(&v.lock().unwrap(), &self.description.value).unwrap());
         }
         Ok(())
     }
 }
 
-impl DataBaseManager {
-    pub fn new() -> Result<DataBaseManager, String> {
-        let mut db_manager = DataBaseManager {
-            type_descriptions: BTreeMap::new(),
-            table_descriptions: ConcHashMap::<String, TableDescription>::new(),
-            tables: ConcHashMap::<String, Arc<Table>>::new(),
-            tx_manager: Arc::new(TransactionManager::new()),
-        };
+impl MetaManager {
+    pub fn new() -> Result<MetaManager, String> {
+        let mut meta_manager = MetaManager { type_descriptions: ConcHashMap::<String, Arc<Box<TypeDescription>>>::new() };
 
         let string_type = TypeDescription {
             name: "string".to_string(),
@@ -531,22 +537,40 @@ impl DataBaseManager {
             }),
         };
 
-        try!(db_manager.add_type(u64_type));
-        try!(db_manager.add_type(string_type));
-        try!(db_manager.add_type(i64_type));
-        try!(db_manager.add_type(date_type));
-        try!(db_manager.add_type(date_time_type));
+        try!(meta_manager.add_type(u64_type));
+        try!(meta_manager.add_type(string_type));
+        try!(meta_manager.add_type(i64_type));
+        try!(meta_manager.add_type(date_type));
+        try!(meta_manager.add_type(date_time_type));
 
-        Ok(db_manager)
+        Ok(meta_manager)
     }
 
     pub fn add_type(&mut self, type_desc: TypeDescription) -> Result<(), String> {
-        if !self.type_descriptions.contains_key(&type_desc.name) {
-            self.type_descriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
-            Ok(())
-        } else {
-            Err(format!("Type with name {} already defined.", type_desc.name))
+        let exist_value = self.type_descriptions.insert(type_desc.name.clone(), Arc::new(Box::new(type_desc)));
+        match exist_value {
+            Some(type_desc) => Err(format!("Type with name {} already defined.", type_desc.name)),
+            None => Ok(()),
         }
+    }
+
+    pub fn get_type(&self, name: &String) -> Option<Arc<Box<TypeDescription>>> {
+        self.type_descriptions.find(name).map(|accessor| accessor.get().clone())
+    }
+}
+
+impl DataBaseManager {
+    pub fn new() -> Result<DataBaseManager, String> {
+        let meta_manager = try!(MetaManager::new());
+
+        let db_manager = DataBaseManager {
+            table_descriptions: ConcHashMap::<String, TableDescription>::new(),
+            tables: ConcHashMap::<String, Arc<Table>>::new(),
+            tx_manager: Arc::new(TransactionManager::new()),
+            meta_manager: Arc::new(meta_manager),
+        };
+
+        Ok(db_manager)
     }
 
     pub fn print_info(&self) -> () {
@@ -574,12 +598,13 @@ impl DataBaseManager {
 	 * return - table name or error description is adding fail */
     pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
         if !self.table_descriptions.find(&table_description.name).is_some() {
-            let table_desc = try!(TableDescription::from_view(&table_description, &self.type_descriptions));
+            let table_desc = try!(TableDescription::from_view(&table_description, self.meta_manager.clone()));
             self.tables.insert(table_desc.name.clone(),
                                Arc::new(Table {
                                    description: table_desc,
                                    data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(),
                                    tx_manager: self.tx_manager.clone(),
+                                   meta_manager: self.meta_manager.clone(),
                                }));
             Ok(table_description.name.clone())
         } else {

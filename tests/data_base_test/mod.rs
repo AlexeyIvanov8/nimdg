@@ -26,13 +26,13 @@ pub fn create_test_data_base() -> DataBaseManager {
         \"name\": \"Client\",
         \"key\": {
             \"fields\": {
-                \"id\": \"u64\"
+                \"id\": {\"type_name\": \"u64\"}
             }
         },
         \"value\": {
             \"fields\": {
-                \"full_name\": \"string\",
-                \"age\": \"u64\"
+                \"full_name\":  {\"type_name\": \"string\"},
+                \"age\":  {\"type_name\": \"u64\"}
              }
         }
     }");

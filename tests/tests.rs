@@ -92,15 +92,13 @@ fn date_test() {
         \"name\": \"Times\",
         \"key\": {
             \"fields\": {
-                \"id\": \
-                                          \"u64\"
+                \"id\": {\"type_name\": \"u64\"}
             }
         },
         \"value\": {
             \"fields\": {
-                \
-                                          \"date\": \"date\"
-                \"date_time\": \"date_time\"
+                \"date\": {\"type_name\": \"date\"}
+                \"date_time\": {\"type_name\": \"date_time\"}
              }
         }
     }");
