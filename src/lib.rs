@@ -1,4 +1,5 @@
 #![feature(rustc_private)]
+#![feature(iterator_for_each)]
 #![crate_name="nimdg"]
 
 
@@ -306,7 +307,7 @@ pub fn mount_api() {
                         handle_response(client, |client| {
                             info!("Table update");
                             let table_desc = try!(TableDescriptionView::from_json(params).map_err(|error| ClientError::from_display(&error)));
-                            match client.app.get_data_base_manager().add_table(table_desc) {
+                            match client.app.get_data_base_manager().add_table(&table_desc) {
                                 Ok(name) => Ok(JsonValue::String(format!("Table with name {} succefully added", name))),
                                 Err(message) => Err(client_error!(message)),
                             }

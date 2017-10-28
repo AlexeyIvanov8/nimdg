@@ -596,9 +596,9 @@ impl DataBaseManager {
 
     /** Add new table by he view description
 	 * return - table name or error description is adding fail */
-    pub fn add_table(&self, table_description: TableDescriptionView) -> Result<String, String> {
+    pub fn add_table(&self, table_description: &TableDescriptionView) -> Result<String, String> {
         if !self.table_descriptions.find(&table_description.name).is_some() {
-            let table_desc = try!(TableDescription::from_view(&table_description, self.meta_manager.clone()));
+            let table_desc = try!(TableDescription::from_view(table_description, self.meta_manager.clone()));
             self.tables.insert(table_desc.name.clone(),
                                Arc::new(Table {
                                    description: table_desc,

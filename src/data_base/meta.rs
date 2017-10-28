@@ -99,12 +99,6 @@ pub struct TableDescriptionView {
 unsafe impl Send for TypeDescription {}
 unsafe impl Sync for TypeDescription {}
 
-// impl ToJson for TypeDescription {
-// fn to_json(&self) -> rustless::json::JsonValue {
-// rustless::json::to_value(self.name.clone())
-// }
-// }
-
 impl EntityDescriptionView {
     fn field_description_from_json(json: &rustless::json::JsonValue) -> Result<FieldDescription, IoEntityError> {
         match json.as_object() {

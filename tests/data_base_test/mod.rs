@@ -42,7 +42,7 @@ pub fn create_test_data_base() -> DataBaseManager {
     let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
     let table_desc_view = table_desc_view_res.unwrap();
     info!("Table desc view = {:?}", table_desc_view);
-    data_base_manager.add_table(table_desc_view);
+    data_base_manager.add_table(&table_desc_view);
     info!("Added table {}",
           data_base_manager.get_table_json(&client_table_name).unwrap());
 

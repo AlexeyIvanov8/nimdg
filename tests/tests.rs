@@ -109,7 +109,7 @@ fn date_test() {
             let table_desc_view_res = TableDescriptionView::from_json(&table_desc_json);
             let table_desc_view = table_desc_view_res.unwrap();
             info!("Table desc view = {:?}", table_desc_view);
-            data_base_manager.add_table(table_desc_view).map_err(|error| info!("Error add table {}", error));
+            data_base_manager.add_table(&table_desc_view).map_err(|error| info!("Error add table {}", error));
             println!("add table");
             info!("Added table {}",
                   data_base_manager.get_table_json(&String::from("Times")).unwrap());
