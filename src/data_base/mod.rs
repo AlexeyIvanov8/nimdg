@@ -25,16 +25,18 @@ mod file_storage;
 
 use data_base::meta::{TypeDescription, EntityDescription, TableDescription, TableDescriptionView};
 use data_base::transaction::{Transaction, TransactionManager, Lock, LockType, LockMode};
+use data_base::file_storage::{FileStorage, FileStorageBase, FileStorageEmpty};
 
 use self::chrono::prelude::*;
 
 
 // Top struct for interaction with tables
 pub struct DataBaseManager {
-    table_descriptions: ConcHashMap<String, TableDescription>,
+    // table_descriptions: ConcHashMap<String, TableDescription>,
     tables: ConcHashMap<String, Arc<Table>>,
     tx_manager: Arc<TransactionManager>,
     meta_manager: Arc<MetaManager>,
+    file_storage: Arc<Option<Box<FileStorageBase>>>,
 }
 
 pub struct MetaManager {
@@ -564,13 +566,23 @@ impl DataBaseManager {
         let meta_manager = try!(MetaManager::new());
 
         let db_manager = DataBaseManager {
-            table_descriptions: ConcHashMap::<String, TableDescription>::new(),
+            // table_descriptions: ConcHashMap::<String, TableDescription>::new(),
             tables: ConcHashMap::<String, Arc<Table>>::new(),
             tx_manager: Arc::new(TransactionManager::new()),
             meta_manager: Arc::new(meta_manager),
+            file_storage: Arc::new(None),
         };
 
         Ok(db_manager)
+    }
+
+    pub fn from_file(directory: String, shapshot_threshold: u32) -> Result<DataBaseManager, PersistenceError> {
+        let file_storage = try!(FileStorageBase::new(directory, shapshot_threshold));
+
+        let mut data_base_manager = try!(DataBaseManager::new().map_err(|error| PersistenceError::Undefined(error)));
+        try!(file_storage.load_data_base(&mut data_base_manager));
+        data_base_manager.file_storage = Arc::new(Some(Box::new(file_storage)));
+        Ok(data_base_manager)
     }
 
     pub fn print_info(&self) -> () {
@@ -578,11 +590,18 @@ impl DataBaseManager {
     }
 
     pub fn get_tables_json_list(&self) -> rustless::json::JsonValue {
-        let res = self.table_descriptions
+        let res = self.tables
             .iter()
-            .map(|(k, v)| (k.clone(), v.to_json()))
+            .map(|(k, v)| (k.clone(), v.description.to_json()))
             .collect();
         rustless::json::JsonValue::Object(res)
+    }
+
+    pub fn get_tables(&self) -> BTreeMap<String, TableDescription> {
+        self.tables
+            .iter()
+            .map(|(k, v)| (k.clone(), v.description.clone()))
+            .collect()
     }
 
     pub fn get_table_json(&self, name: &String) -> Option<rustless::json::JsonValue> {
@@ -594,18 +613,29 @@ impl DataBaseManager {
         self.tables.find(name).map(|accessor| accessor.get().clone())
     }
 
+    fn update_table_description(file_storage: Arc<Option<Box<FileStorageBase>>>, table_description: &TableDescription) -> Result<(), String> {
+        match *file_storage {
+            Some(ref storage) => {
+                storage.update_table_description(table_description)
+                    .map_err(|error| format!("{}", error))
+            }
+            None => Ok(()),
+        }
+    }
+
     /** Add new table by he view description
 	 * return - table name or error description is adding fail */
     pub fn add_table(&self, table_description: &TableDescriptionView) -> Result<String, String> {
-        if !self.table_descriptions.find(&table_description.name).is_some() {
+        if !self.tables.find(&table_description.name).is_some() {
             let table_desc = try!(TableDescription::from_view(table_description, self.meta_manager.clone()));
             self.tables.insert(table_desc.name.clone(),
                                Arc::new(Table {
-                                   description: table_desc,
+                                   description: table_desc.clone(),
                                    data: ConcHashMap::<Entity, Arc<Mutex<Entity>>>::new(),
                                    tx_manager: self.tx_manager.clone(),
                                    meta_manager: self.meta_manager.clone(),
                                }));
+            try!(DataBaseManager::update_table_description(self.file_storage.clone(), &table_desc));
             Ok(table_description.name.clone())
         } else {
             Err(format!("Table with name {} already exists.", table_description.name))

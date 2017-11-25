@@ -23,7 +23,7 @@ pub struct TypeDescription {
 
 // Universal description of some entity. For example: key or value
 // For performance purposes each field is marked by number id
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntityDescription {
     count: u16,
     pub fields: BTreeMap<String, Arc<Box<FieldDescription>>>, // name -> type_code
@@ -75,7 +75,7 @@ pub struct FieldDescription {
 }
 
 // Description of table, that is key-value cache
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableDescription {
     pub name: String,
     pub key: EntityDescription,

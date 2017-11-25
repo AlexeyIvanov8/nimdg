@@ -4,42 +4,68 @@ extern crate serde_json;
 
 use std::sync::atomic::AtomicUsize;
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::fs;
 
 use data_base::DataBaseManager;
 use data_base::{PersistenceError, IoEntityError};
 use data_base::transaction::Transaction;
 use data_base::meta::{TableDescription, TableDescriptionView};
+use std::collections::BTreeSet;
 
-pub struct FileStorage {
+pub struct FileStorageBase {
     directory: String,
     snapshot_threshold: u32, // count of transactions, after that will begin shapshot creation
     transactions_count: AtomicUsize,
     file: BufWriter<File>,
 }
 
+pub struct FileStorageEmpty {}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct Meta {
-    table_names: Vec<String>,
+    table_names: BTreeSet<String>,
 }
 
 macro_rules! convert_error {
     ($error:expr) => (PersistenceError::FileStorageError(format!("{}", $error)))
 }
 
-impl FileStorage {
+pub trait FileStorage {
+    fn create_snapshot() -> Result<(), PersistenceError>;
+    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError>;
+    fn update_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError>;
+    fn save_data_base(&self, data_base_manager: &DataBaseManager) -> Result<(), PersistenceError>;
+    fn load_data_base(&self, data_base_manager: &mut DataBaseManager) -> Result<(), PersistenceError>;
+}
+
+impl FileStorageBase {
     fn open_or_create_file(path: String) -> Result<File, PersistenceError> {
-        match File::open(path.clone()) {
-            Ok(file) => Ok(file),
-            Err(_) => File::create(path.clone()).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))),
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            //.append(true)
+            //.truncate(true)
+            .open(path.clone())
+            /*File::open(path.clone())*/ {
+            Ok(file) => {
+                debug!("File {} succefull open", path);
+                Ok(file)
+            },
+            Err(_) => {
+                debug!("File {} dont open and will be created", path);
+                File::create(path.clone()).map_err(|error| PersistenceError::FileStorageError(format!("open {} fail: {}", path, error)))
+            },
         }
     }
 
-    pub fn new(directory: String, snapshot_threshold: u32) -> Result<FileStorage, PersistenceError> {
-        let meta_file = FileStorage::open_or_create_file(format!("{}/meta.ndg", directory));
+    pub fn new(directory: String, snapshot_threshold: u32) -> Result<FileStorageBase, PersistenceError> {
+        fs::create_dir_all(directory.clone()).map_err(|error| convert_error!(error))?;
+        // let meta_file = FileStorageBase::open_or_create_file(format!("{}/meta.ndg", directory))?;
         let transactions_file_name = format!("{}/transactions.ndg", directory);
-        let file = try!(File::open(transactions_file_name).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
-        Ok(FileStorage {
+        let file = FileStorageBase::open_or_create_file(transactions_file_name)?;
+        Ok(FileStorageBase {
             transactions_count: AtomicUsize::new(0),
             snapshot_threshold: snapshot_threshold,
             directory: directory,
@@ -47,33 +73,27 @@ impl FileStorage {
         })
     }
 
-    fn create_snapshot() -> Result<(), PersistenceError> {
-        Ok(())
-    }
-
-    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError> {
-        Ok(())
-    }
-
     fn save_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError> {
-        let mut desc_file = try!(FileStorage::open_or_create_file(format!("{}/meta/{}.tbl", self.directory, table_description.name)));
+        debug!("Begin save {} table description", table_description.name);
+
+        let path = format!("{}/meta/{}.tbl", self.directory, table_description.name);
+        fs::create_dir_all(format!("{}/meta", self.directory))
+            .map_err(|error| PersistenceError::FileStorageError(format!("Create dir {}/meta error: {}", self.directory, error)))?;
+        let desc_file = try!(FileStorageBase::open_or_create_file(path.clone()));
+        try!(desc_file.set_len(0).map_err(|error| PersistenceError::FileStorageError(format!("Fail set len = 0 for {}: {}", path, error))));
         let table_view = table_description.to_view();
         let json_table_view = try!(serde_json::to_string(&table_view).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
-        try!(write!(&desc_file, "{}", json_table_view).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
-        // try!(desc_file.write_fmt("{}", json_table_view)
-        // .map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
+        try!(write!(&desc_file, "{}", json_table_view)
+            .map_err(|error| PersistenceError::FileStorageError(format!("Write {} error: {}", path.clone(), error))));
+        debug!("{} table description saved to {}",
+               table_description.name,
+               path);
         Ok(())
     }
 
-    pub fn save_meta(&self, data_base_manager: &DataBaseManager) -> Result<(), PersistenceError> {
-        let save_result: Result<Vec<String>, PersistenceError> = data_base_manager.table_descriptions
-            .iter()
-            .map(|(name, desc)| self.save_table_description(desc).map(|_| name.clone()))
-            .collect();
-        let table_names = try!(save_result);
-        let mut common_meta_file = try!(FileStorage::open_or_create_file(format!("{}/meta/description.ndg", self.directory)));
-        let meta = Meta { table_names: table_names };
-        let json_meta = try!(serde_json::to_string(&meta).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
+    fn save_meta(&self, meta: &Meta) -> Result<(), PersistenceError> {
+        let common_meta_file = try!(FileStorageBase::open_or_create_file(format!("{}/meta/description.ndg", self.directory)));
+        let json_meta = try!(serde_json::to_string(meta).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
         try!(write!(&common_meta_file, "{}", json_meta).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
         Ok(())
     }
@@ -86,20 +106,74 @@ impl FileStorage {
         Ok(table_desc)
     }
 
-    fn load_meta(&self, data_base_manager: &mut DataBaseManager) -> Result<(), PersistenceError> {
-        let meta_file = try!(FileStorage::open_or_create_file(format!("{}/meta.ndg", self.directory)));
+    fn load_meta(&self) -> Result<Meta, PersistenceError> {
+        let path = format!("{}/meta/description.ndg", self.directory);
+        let mut meta_file = try!(FileStorageBase::open_or_create_file(path.clone()));
         let mut meta_description_str: String = String::new();
-        let mut meta_file_reader = BufReader::new(meta_file);
-        try!(meta_file_reader.read_to_string(&mut meta_description_str)
-            .map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
-        let meta_description: Meta = try!(serde_json::from_str(&meta_description_str)
-            .map_err(|error| PersistenceError::IoEntity(IoEntityError::Read(format!("{}", error)))));
-        debug!("Read meta {:?}", meta_description);
+        let metadata = meta_file.metadata().unwrap();
+        // let mut meta_file_reader = BufReader::new(meta_file);
+        try!(// meta_file_reader.read_to_string(&mut meta_description_str)
+             meta_file.read_to_string(&mut meta_description_str)
+            .map_err(|error| {
+                PersistenceError::FileStorageError(format!("Read meta from {}, metadata = {:?}, error: {}",
+                                                           path,
+                                                           metadata,
+                                                           error))
+            }));
+        debug!("Load meta_description_str = {}", meta_description_str);
+        if meta_description_str.is_empty() {
+            Ok(Meta { table_names: BTreeSet::new() })
+        } else {
+            let meta: Meta = try!(serde_json::from_str(&meta_description_str).map_err(|error| {
+                PersistenceError::IoEntity(IoEntityError::Read(format!("Read meta from JS {} error: {}",
+                                                                       meta_description_str,
+                                                                       error)))
+            }));
+            debug!("Read meta {:?}", meta);
+            Ok(meta)
+        }
+    }
+}
 
-        let table_descs: Vec<TableDescriptionView> = try!(meta_description.table_names
+impl FileStorage for FileStorageBase {
+    fn create_snapshot() -> Result<(), PersistenceError> {
+        Ok(())
+    }
+
+    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError> {
+        Ok(())
+    }
+
+    fn update_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError> {
+        try!(self.save_table_description(table_description));
+        let mut meta: Meta = try!(self.load_meta());
+        meta.table_names.insert(table_description.name.clone());
+        try!(self.save_meta(&meta));
+        debug!("meta {:?} is saved", meta);
+        Ok(())
+    }
+
+    fn save_data_base(&self, data_base_manager: &DataBaseManager) -> Result<(), PersistenceError> {
+        let save_result: Result<BTreeSet<String>, PersistenceError> = data_base_manager.tables
+            .iter()
+            .map(|(name, table)| self.save_table_description(&(table.description)).map(|_| name.clone()))
+            .collect();
+        let table_names = try!(save_result);
+        let meta = Meta { table_names: table_names };
+        try!(self.save_meta(&meta));
+        // let json_meta = try!(serde_json::to_string(&meta).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
+        // try!(write!(&common_meta_file, "{}", json_meta).map_err(|error| PersistenceError::FileStorageError(format!("{}", error))));
+        Ok(())
+    }
+
+    fn load_data_base(&self, data_base_manager: &mut DataBaseManager) -> Result<(), PersistenceError> {
+        let meta: Meta = try!(self.load_meta());
+        debug!("Loaded meta = {:?}", meta);
+        let table_descs: Vec<TableDescriptionView> = try!(meta.table_names
             .iter()
             .map(|table_name| self.load_table_description(table_name))
             .collect());
+        debug!("Loaded tables descs = {:?}", table_descs);
         let res: Vec<String> = try!(table_descs.iter()
             .map(move |table_desc| data_base_manager.add_table(table_desc).map_err(|error| convert_error!(error)))
             .collect());
@@ -107,4 +181,22 @@ impl FileStorage {
     }
 
     // fn load_data_base() -> Result<FileStorage, PersistenceError> {}
+}
+
+impl FileStorage for FileStorageEmpty {
+    fn create_snapshot() -> Result<(), PersistenceError> {
+        Ok(())
+    }
+    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError> {
+        Ok(())
+    }
+    fn update_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError> {
+        Ok(())
+    }
+    fn save_data_base(&self, data_base_manager: &DataBaseManager) -> Result<(), PersistenceError> {
+        Ok(())
+    }
+    fn load_data_base(&self, data_base_manager: &mut DataBaseManager) -> Result<(), PersistenceError> {
+        Ok(())
+    }
 }

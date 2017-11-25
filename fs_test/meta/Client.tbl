@@ -1,0 +1,1 @@
+{"name":"Client","key":{"fields":{"id":{"type_name":"u64"}}},"value":{"fields":{"age":{"type_name":"u64"},"full_name":{"type_name":"string"}}}}

@@ -18,7 +18,8 @@ fn rollback_test() {
     log4rs::init_file("config/log4rs.yml", Default::default());
 
     let client_table_name: String = String::from("Client");
-    let data_base_manager = create_test_data_base();
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    create_test_data_base(&data_base_manager);
 
     let key_one = JsonValue::from_str("{\"id\": 2 }").unwrap();
     let value_one = JsonValue::from_str("{
@@ -53,7 +54,8 @@ fn rollback_test() {
 fn optimistic_tx_success_test() {
     log4rs::init_file("config/log4rs.yml", Default::default());
     let client_table_name: String = String::from("Client");
-    let data_base_manager = create_test_data_base();
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    create_test_data_base(&data_base_manager);
     let tx_id = data_base_manager.tx_start(LockMode::Optimistic).map_err(|error| println!("Tx start error = {}", error)).unwrap();
 
     let key = IdKey { id: 1 };
@@ -75,7 +77,8 @@ fn optimistic_tx_success_test() {
 fn optimistic_tx_fail_test() {
     log4rs::init_file("config/log4rs.yml", Default::default());
     let client_table_name: String = String::from("Client");
-    let data_base_manager = create_test_data_base();
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    create_test_data_base(&data_base_manager);
 
     let key = IdKey { id: 1 };
     let client = Client {

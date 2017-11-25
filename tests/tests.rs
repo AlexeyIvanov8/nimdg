@@ -32,7 +32,9 @@ fn put_test() {
 
     let client_table_name: String = String::from("Client");
 
-    let data_base_manager = create_test_data_base();
+
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    create_test_data_base(&data_base_manager);
 
     let key_one = JsonValue::from_str("{\"id\": 2 }").unwrap();
     let value_one = JsonValue::from_str("{
@@ -142,7 +144,8 @@ fn get_list_test() {
     log4rs::init_file("config/log4rs.yml", Default::default());
 
     let client_table_name: String = String::from("Client");
-    let data_base_manager = create_test_data_base();
+    let data_base_manager: DataBaseManager = DataBaseManager::new().unwrap();
+    create_test_data_base(&data_base_manager);
 
     let tx_id = data_base_manager.tx_start(LockMode::Pessimistic).map_err(|err| println!("Tx start error = {}", err)).unwrap();
     for i in 1..100 {
