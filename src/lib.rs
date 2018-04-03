@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 #![feature(iterator_for_each)]
+#![feature(use_extern_macros)]
 #![crate_name="nimdg"]
 
 

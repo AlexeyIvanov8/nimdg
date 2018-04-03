@@ -1,4 +1,5 @@
 
+extern crate bincode;
 extern crate serde;
 extern crate serde_json;
 
@@ -6,18 +7,23 @@ use std::sync::atomic::AtomicUsize;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::fs::{File, OpenOptions};
 use std::fs;
+use std::sync::Mutex;
 
-use data_base::DataBaseManager;
+use data_base::{DataBaseManager, Entity, Field};
 use data_base::{PersistenceError, IoEntityError};
 use data_base::transaction::Transaction;
 use data_base::meta::{TableDescription, TableDescriptionView};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, BTreeMap};
+
+use self::serde::ser::Serialize;
+use self::serde::de::Deserialize;
+use bincode::{serialize, deserialize, Infinite};
 
 pub struct FileStorageBase {
     directory: String,
     snapshot_threshold: u32, // count of transactions, after that will begin shapshot creation
     transactions_count: AtomicUsize,
-    file: BufWriter<File>,
+    file: Mutex<BufWriter<File>>,
 }
 
 pub struct FileStorageEmpty {}
@@ -27,13 +33,33 @@ struct Meta {
     table_names: BTreeSet<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+enum OperationType {
+    Insert,
+    Delet,
+}
+
+// Because lock is not serializable
+#[derive(Serialize, Deserialize)]
+struct PersistEntity {
+    fields: BTreeMap<u16, Field>,
+}
+
+#[derive(serde::ser::Serialize, self::serde::de::Deserialize)]
+struct TransactionalOperation {
+    table_name: String,
+    key: PersistEntity,
+    value: PersistEntity,
+    operation_type: OperationType,
+}
+
 macro_rules! convert_error {
     ($error:expr) => (PersistenceError::FileStorageError(format!("{}", $error)))
 }
 
 pub trait FileStorage {
-    fn create_snapshot() -> Result<(), PersistenceError>;
-    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError>;
+    fn create_snapshot(&self) -> Result<(), PersistenceError>;
+    fn save_transaction(&self, transaction: &Transaction) -> Result<(), PersistenceError>;
     fn update_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError>;
     fn save_data_base(&self, data_base_manager: &DataBaseManager) -> Result<(), PersistenceError>;
     fn load_data_base(&self, data_base_manager: &mut DataBaseManager) -> Result<(), PersistenceError>;
@@ -69,7 +95,7 @@ impl FileStorageBase {
             transactions_count: AtomicUsize::new(0),
             snapshot_threshold: snapshot_threshold,
             directory: directory,
-            file: BufWriter::new(file),
+            file: Mutex::new(BufWriter::new(file)),
         })
     }
 
@@ -135,12 +161,31 @@ impl FileStorageBase {
     }
 }
 
+impl PersistEntity {
+    pub fn new(entity: &Entity) -> PersistEntity {
+        PersistEntity { fields: entity.fields.clone() }
+    }
+}
+
 impl FileStorage for FileStorageBase {
-    fn create_snapshot() -> Result<(), PersistenceError> {
+    fn create_snapshot(&self) -> Result<(), PersistenceError> {
         Ok(())
     }
 
-    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError> {
+    fn save_transaction(&self, transaction: &Transaction) -> Result<(), PersistenceError> {
+        let mut writer = self.file.lock().unwrap();
+        transaction.get_locked_keys()
+            .iter()
+            .for_each(|(key, value)| {
+                let transactional_operation = TransactionalOperation {
+                    table_name: key.table_name.clone(),
+                    key: PersistEntity::new(&key.key),
+                    value: PersistEntity::new(&value.value),
+                    operation_type: OperationType::Insert,
+                };
+                let encoded: Vec<u8> = serialize(&transactional_operation, Infinite).unwrap();
+                writer.write(&encoded);
+            });
         Ok(())
     }
 
@@ -184,10 +229,10 @@ impl FileStorage for FileStorageBase {
 }
 
 impl FileStorage for FileStorageEmpty {
-    fn create_snapshot() -> Result<(), PersistenceError> {
+    fn create_snapshot(&self) -> Result<(), PersistenceError> {
         Ok(())
     }
-    fn save_transaction(transaction: &Transaction) -> Result<(), PersistenceError> {
+    fn save_transaction(&self, transaction: &Transaction) -> Result<(), PersistenceError> {
         Ok(())
     }
     fn update_table_description(&self, table_description: &TableDescription) -> Result<(), PersistenceError> {

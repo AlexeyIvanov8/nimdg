@@ -20,16 +20,16 @@ pub struct Lock {
     condition: Arc<(Mutex<bool>, Condvar)>,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Serialize, Deserialize)]
 pub enum LockType {
     Read,
     Write,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
-struct LockedKey {
-    table_name: String,
-    key: Entity,
+pub struct LockedKey {
+    pub table_name: String,
+    pub key: Entity,
 }
 
 #[derive(Clone)]
@@ -335,5 +335,9 @@ impl Transaction {
                 key: key.clone(),
             })
             .map(|accessor| accessor.get())
+    }
+
+    pub fn get_locked_keys(&self) -> Arc<ConcHashMap<LockedKey, LockedValue>> {
+        self.locked_keys.clone()
     }
 }

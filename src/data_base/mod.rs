@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use concurrent_hashmap::*;
 
-use bincode::rustc_serialize::{encode, decode};
+use bincode::{serialize, deserialize, Infinite};
 
 use rustless;
 use rustless::json::ToJson;
@@ -44,7 +44,7 @@ pub struct MetaManager {
 }
 
 // Field of entity
-#[derive(Debug, Eq, Clone)]
+#[derive(Debug, Eq, Clone, Serialize, Deserialize)]
 struct Field {
     data: Vec<u8>,
 }
@@ -447,13 +447,13 @@ impl MetaManager {
             reader: Box::new(move |json| {
                 match json.clone() {
                     rustless::json::JsonValue::String(value) => {
-                        encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string()))
+                        serialize(&value.clone(), Infinite).map_err(|err| IoEntityError::Read(err.to_string()))
                     }
                     _ => Err(IoEntityError::Read(format!("Expected type String: {}", json))),
                 }
             }),
             writer: Box::new(|value: &Vec<u8>| {
-                let string: String = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+                let string: String = try!(deserialize(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::String(string))
             }),
         };
@@ -462,14 +462,12 @@ impl MetaManager {
             name: "u64".to_string(),
             reader: Box::new(move |json| {
                 match json.clone() {
-                    rustless::json::JsonValue::U64(value) => {
-                        encode(&value.clone(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string()))
-                    }
+                    rustless::json::JsonValue::U64(value) => serialize(&value.clone(), Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
                     _ => Err(IoEntityError::Read(format!("Expected type u64: {}", json))),
                 }
             }),
             writer: Box::new(|ref value| {
-                let u64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+                let u64_value = try!(deserialize(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::U64(u64_value))
             }),
         };
@@ -478,12 +476,12 @@ impl MetaManager {
             name: "i64".to_string(),
             reader: Box::new(|ref json| {
                 match json.clone().as_i64() {
-                    Some(value) => encode(&value, bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
+                    Some(value) => serialize(&value, Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
                     None => Err(IoEntityError::Read(format!("Expected type i64: {}", json))),
                 }
             }),
             writer: Box::new(|ref value| {
-                let i64_value = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+                let i64_value = try!(deserialize(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::I64(i64_value))
             }),
         };
@@ -496,11 +494,7 @@ impl MetaManager {
                 match *json {
                     &rustless::json::JsonValue::String(ref value) => {
                         match NaiveDate::parse_from_str(value.clone().as_ref(), date_fmt) {
-                            Ok(date) => {
-                                encode(&date.format(date_fmt).to_string(),
-                                       bincode::SizeLimit::Infinite)
-                                    .map_err(|err| IoEntityError::Read(err.to_string()))
-                            }
+                            Ok(date) => serialize(&date.format(date_fmt).to_string(), Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
                             Err(error) => {
                                 Err(IoEntityError::Read(format!("Non parseable date {}, {}. Required format: {}",
                                                                 value,
@@ -513,7 +507,7 @@ impl MetaManager {
                 }
             }),
             writer: Box::new(|ref value| {
-                let date_string = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+                let date_string = try!(deserialize(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::String(date_string))
             }),
         };
@@ -524,9 +518,7 @@ impl MetaManager {
                 match *json {
                     &rustless::json::JsonValue::String(ref value) => {
                         match DateTime::parse_from_rfc3339(value.clone().as_ref()) {
-                            Ok(date_time) => {
-                                encode(&date_time.timestamp(), bincode::SizeLimit::Infinite).map_err(|err| IoEntityError::Read(err.to_string()))
-                            }
+                            Ok(date_time) => serialize(&date_time.timestamp(), Infinite).map_err(|err| IoEntityError::Read(err.to_string())),
                             Err(error) => Err(IoEntityError::Read(format!("Non parseable date_time {}, {}", value, error))),
                         }
                     }
@@ -534,7 +526,7 @@ impl MetaManager {
                 }
             }),
             writer: Box::new(|ref value| {
-                let timestamp = try!(decode(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
+                let timestamp = try!(deserialize(&value[..]).map_err(|err| IoEntityError::Write(err.to_string())));
                 Ok(rustless::json::JsonValue::String(Utc.timestamp(timestamp, 0).to_rfc3339()))
             }),
         };
